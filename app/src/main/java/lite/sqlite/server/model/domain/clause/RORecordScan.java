@@ -1,4 +1,4 @@
-package lite.sqlite.server.cmdinterface.domain.clause;
+package lite.sqlite.server.model.domain.clause;
 
 /**
  * Interface for read-only record scanning.

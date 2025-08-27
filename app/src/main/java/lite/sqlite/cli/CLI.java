@@ -5,13 +5,6 @@ package lite.sqlite.cli;
  * This interface defines the basic operations of a CLI.
  */
 public interface CLI {
-    /**
-     * Starts the command-line interface.
-     */
     void start();
-    
-    /**
-     * Stops the command-line interface.
-     */
     void stop();
 }

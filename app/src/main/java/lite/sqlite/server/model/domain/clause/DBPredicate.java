@@ -1,4 +1,4 @@
-package lite.sqlite.server.cmdinterface.domain.clause;
+package lite.sqlite.server.model.domain.clause;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -15,6 +15,19 @@ public class DBPredicate {
      * Creates a new empty predicate.
      */
     public DBPredicate() {
+    }
+
+    /**
+     * Creates a new predicate from a string expression.
+     * This is a simplified constructor for basic predicates.
+     */
+    public DBPredicate(String expression) {
+        // For now, store the expression as a simple string
+        // You can extend this to parse the expression into proper DBTerms
+        if (expression != null && !expression.trim().isEmpty()) {
+            // Simple implementation - you can enhance this later
+            this.add(new DBTerm("temp_field", DBTerm.EQUALS, new DBConstant(expression)));
+        }
     }
 
     /**
@@ -61,7 +74,8 @@ public class DBPredicate {
                 return c;
         }
         return null;
-    }    public String toString() {
+    }    
+    public String toString() {
         Iterator<DBTerm> iter = terms.iterator();
         if (!iter.hasNext()) return "";
         String result = iter.next().toString();

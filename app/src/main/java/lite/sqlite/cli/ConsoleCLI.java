@@ -1,15 +1,15 @@
 package lite.sqlite.cli;
 
 import java.util.Scanner;
-import lite.sqlite.server.IQueryEngine;
-import lite.sqlite.server.TableDto;
+import lite.sqlite.server.QueryEngine;
+import lite.sqlite.cli.TableDto;;
 
 /**
  * Console implementation of the CLI interface.
  * This class provides a command-line interface for interacting with the database.
  */
 public class ConsoleCLI implements CLI {
-    private final IQueryEngine queryEngine;
+    private final QueryEngine queryEngine;
     private boolean running;
     private Scanner scanner;
     private TablePrinter tablePrinter;
@@ -19,7 +19,7 @@ public class ConsoleCLI implements CLI {
      * 
      * @param queryEngine the query engine to use
      */
-    public ConsoleCLI(IQueryEngine queryEngine) {
+    public ConsoleCLI(QueryEngine queryEngine) {
         this.queryEngine = queryEngine;
         this.tablePrinter = new TablePrinter();
     }
@@ -46,9 +46,6 @@ public class ConsoleCLI implements CLI {
         System.out.println("Goodbye!");
     }
     
-    /**
-     * Main CLI loop that processes user input.
-     */
     private void cliLoop() {
         while (running) {
             System.out.print("litesql> ");

@@ -3,9 +3,6 @@ package lite.sqlite.cli;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Utility class for printing tables to the console.
- */
 public class TablePrinter {
     
     /**
@@ -14,31 +11,36 @@ public class TablePrinter {
      * @param tableDto the data to print
      */
     public void print(TableDto tableDto) {
-        if (tableDto == null || tableDto.columns == null || tableDto.rows == null) {
+        if (tableDto == null) {
             System.out.println("No data to display");
             return;
         }
         
-        // Handle update results with no table data
-        if (tableDto.columns.isEmpty() && tableDto.affectedRows > 0) {
-            System.out.println(tableDto.affectedRows + " row(s) affected");
+        // Handle message results (like error or update messages)
+        if (tableDto.message != null && !tableDto.message.isEmpty()) {
+            System.out.println(tableDto.message);
             return;
         }
         
-        // Calculate column widths
+        // Handle query results
+        if (tableDto.columnNames == null || tableDto.rowValues == null) {
+            System.out.println("No data to display");
+            return;
+        }
+        
         List<Integer> columnWidths = calculateColumnWidths(tableDto);
         
         // Print header
-        printRow(tableDto.columns, columnWidths);
+        printRow(tableDto.columnNames, columnWidths);
         printSeparator(columnWidths);
         
         // Print rows
-        for (List<String> row : tableDto.rows) {
+        for (List<String> row : tableDto.rowValues) {
             printRow(row, columnWidths);
         }
         
         // Print row count
-        System.out.println(tableDto.rows.size() + " row(s) returned");
+        System.out.println(tableDto.rowValues.size() + " row(s) returned");
     }
     
     /**
@@ -51,12 +53,12 @@ public class TablePrinter {
         List<Integer> widths = new ArrayList<>();
         
         // Initialize with header widths
-        for (String columnName : tableDto.columns) {
+        for (String columnName : tableDto.columnNames) {
             widths.add(Math.max(columnName.length(), 5));
         }
         
         // Update with data widths
-        for (List<String> row : tableDto.rows) {
+        for (List<String> row : tableDto.rowValues) {
             for (int i = 0; i < row.size() && i < widths.size(); i++) {
                 String value = row.get(i);
                 if (value != null) {

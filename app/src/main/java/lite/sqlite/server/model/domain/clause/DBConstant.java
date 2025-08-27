@@ -1,4 +1,4 @@
-package lite.sqlite.server.cmdinterface.domain.clause;
+package lite.sqlite.server.model.domain.clause;
 
 import java.io.Serializable;
 
@@ -7,11 +7,11 @@ public class DBConstant implements Comparable<DBConstant>, Serializable {
     private Integer ival;
     private String sval;
 
-    DBConstant(Integer val) {
+    public DBConstant(Integer val) {
         this.ival = val;
     }
 
-    DBConstant(String str) {
+    public DBConstant(String str) {
         this.sval = str;
     }
 

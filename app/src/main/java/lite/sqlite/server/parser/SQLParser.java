@@ -1,14 +1,15 @@
-package lite.sqlite.server.cmdinterface.domain.parserImpl;
+package lite.sqlite.server.parser;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
 import org.apache.shardingsphere.sql.parser.mysql.parser.MySQLLexer;
-import lite.sqlite.server.cmdinterface.domain.parserImpl.MySqlStatementVisitor;
-import lite.sqlite.server.cmdinterface.IParser;
-import lite.sqlite.server.cmdinterface.domain.commands.QueryData;
 
-public class SQLParser implements IParser {
-      MySqlStatementVisitor sqlStatementVisitor;
+import lite.sqlite.server.Parser;
+import lite.sqlite.server.model.domain.commands.QueryData;
+
+public class SQLParser implements Parser {
+    
+    MySqlStatementVisitor sqlStatementVisitor;
 
     public SQLParser(String sql) {
         MySQLLexer lexer = new MySQLLexer(CharStreams.fromString(sql));
@@ -27,6 +28,4 @@ public class SQLParser implements IParser {
     public Object updateCmd() {
         return sqlStatementVisitor.getValue();
     }
-
-    
 }

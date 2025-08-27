@@ -2,13 +2,15 @@ package lite.sqlite.server;
 
 import java.util.List;
 
+import com.google.common.collect.Table;
+
 import lite.sqlite.cli.TableDto;
 
 /**
  * Interface for query execution engine.
  * This provides methods to execute SQL queries and updates.
  */
-public interface IQueryEngine {
+public interface QueryEngine {
     
     /**
      * Executes a SQL query (e.g., SELECT statement) and returns results.
@@ -25,4 +27,11 @@ public interface IQueryEngine {
      * @return a TableDto containing information about the operation
      */
     TableDto doUpdate(String sql);
+    
+    /**
+     * Closes the query engine and releases resources.
+     */
+    default void close() {
+        // Default implementation does nothing
+    }
 }

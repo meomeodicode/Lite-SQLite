@@ -1,13 +1,13 @@
-package lite.sqlite.server.cmdinterface.domain.clause;
+package lite.sqlite.server.model.domain.clause;
 
 /**
  * Represents an expression in a database query.
  * An expression can be a field reference, a constant, or a computed value.
  */
 public class DBExpression {
-    public static final int FIELD = 0;    // Expression references a field
-    public static final int CONSTANT = 1; // Expression is a constant
-    public static final int OPERATION = 2; // Expression is a computed value
+    public static final int FIELD = 0;    
+    public static final int CONSTANT = 1; 
+    public static final int OPERATION = 2; 
     
     public static final int ADD = 1;
     public static final int SUBTRACT = 2;
