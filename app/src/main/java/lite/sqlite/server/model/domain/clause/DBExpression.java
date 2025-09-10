@@ -1,5 +1,7 @@
 package lite.sqlite.server.model.domain.clause;
 
+import lite.sqlite.server.RORecordScan;
+
 /**
  * Represents an expression in a database query.
  * An expression can be a field reference, a constant, or a computed value.

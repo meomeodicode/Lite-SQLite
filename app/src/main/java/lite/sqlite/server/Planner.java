@@ -1,5 +1,5 @@
 package lite.sqlite.server;
 
-public class Planner {
+public interface Planner {
     
 }

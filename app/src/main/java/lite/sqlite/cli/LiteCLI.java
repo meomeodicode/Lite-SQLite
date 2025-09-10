@@ -44,9 +44,8 @@ public class LiteCLI {
         result = new TableDto("Unknown command: " + sql);
       }
       
-      // Print the result
-      if (result.message != null && !result.message.isEmpty()) {
-        System.out.println(result.message);
+      if (result.getErrorMessage() != null && !result.getErrorMessage().isEmpty()) {
+        System.out.println(result.getErrorMessage());
       } else {
         tblPrinter.print(result);
       }

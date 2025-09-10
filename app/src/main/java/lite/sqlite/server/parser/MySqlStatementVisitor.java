@@ -71,7 +71,16 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     @Override
     public Object visitCreateTable(MySQLStatementParser.CreateTableContext ctx) {
-        commandType = CommandType.CREATE_TABLE;
+        System.out.println("DEBUG: visitCreateTable called");
+        System.out.println("DEBUG: Context text: " + ctx.getText());
+        
+        this.commandType = CommandType.CREATE_TABLE;
+        
+        // Extract table name
+        if (ctx.tableName() != null) {
+            this.tableName = ctx.tableName().getText();
+            System.out.println("DEBUG: Found table name: " + this.tableName);
+        }
         return super.visitCreateTable(ctx);
     }
 
@@ -84,7 +93,32 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     @Override
     public Object visitInsert(MySQLStatementParser.InsertContext ctx) {
+        System.out.println("DEBUG: visitInsert called: " + ctx.getText());
         commandType = CommandType.INSERT;
+        
+        insertFields.clear();
+        insertedVals.clear();
+        
+        String insertText = ctx.getText();
+        System.out.println("DEBUG: Parsing INSERT: " + insertText);
+        
+        int firstParen = insertText.indexOf('(');
+        int firstCloseParen = insertText.indexOf(')', firstParen);
+        
+        if (firstParen != -1 && firstCloseParen != -1) {
+            String columnsPart = insertText.substring(firstParen + 1, firstCloseParen);
+            System.out.println("DEBUG: Found columns: " + columnsPart);
+            
+            String[] columns = columnsPart.split(",");
+            for (String column : columns) {
+                String cleanColumn = column.trim();
+                if (!cleanColumn.isEmpty()) {
+                    insertFields.add(cleanColumn);
+                    System.out.println("DEBUG: Added field: " + cleanColumn);
+                }
+            }
+        }
+        
         return super.visitInsert(ctx);
     }
 
@@ -119,6 +153,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitColumnName(MySQLStatementParser.ColumnNameContext ctx) {
         if (commandType == CommandType.INSERT && ctx.getText() != null) {
+            System.out.println("column names:" + ctx.getText());
             this.insertFields.add(ctx.getText());
         }
         return super.visitColumnName(ctx);
@@ -139,7 +174,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitWhereClause(MySQLStatementParser.WhereClauseContext ctx) {
         if (ctx.expr() != null) {
-            // Simple predicate parsing - you can extend this for more complex expressions
             this.pred = new DBPredicate(ctx.expr().getText());
         }
         return super.visitWhereClause(ctx);
@@ -156,13 +190,25 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitColumnDefinition(MySQLStatementParser.ColumnDefinitionContext ctx) {
         if (ctx.getText() != null) {
-            // Simple parsing - extract field name and type from text
+            System.out.println("Visit column:" + ctx.getText());
             String text = ctx.getText();
-            String[] parts = text.split("\\s+");
-            if (parts.length >= 2) {
-                String fieldName = parts[0];
-                String fieldType = parts[1];
+            
+            String fieldName = null;
+            String fieldType = null;
+            
+            for (int i = 1; i < text.length(); i++) {
+                if (Character.isUpperCase(text.charAt(i))) {
+                    fieldName = text.substring(0, i);
+                    fieldType = text.substring(i);
+                    break;
+                }
+            }
+            
+            if (fieldName != null && fieldType != null) {
+                System.out.println("DEBUG: Parsed field: " + fieldName + " type: " + fieldType);
                 this.schema.addField(fieldName, fieldType);
+            } else {
+                System.out.println("DEBUG: Could not parse: " + text);
             }
         }
         return super.visitColumnDefinition(ctx);

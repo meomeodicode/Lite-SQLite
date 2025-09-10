@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import lite.sqlite.server.RORecordScan;
+
 /**
  * Represents a predicate in a database query, composed of one or more terms.
  * Terms in a predicate are combined with logical AND (conjunction).

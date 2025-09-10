@@ -64,10 +64,10 @@ public class ConsoleCLI implements CLI {
                     result = queryEngine.doUpdate(sql);
                 }
                 
-                if (result.message.isEmpty()) {
+                if (result.getErrorMessage().isEmpty()) {
                     tablePrinter.print(result);
                 } else {
-                    System.out.println(result.message);
+                    System.out.println(result.getErrorMessage());
                 }
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());

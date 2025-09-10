@@ -1,5 +1,7 @@
 package lite.sqlite.server.model.domain.clause;
 
+import lite.sqlite.server.RORecordScan;
+
 /**
  * Represents a term in a database query predicate.
  * A term is a comparison between a field and a constant value,

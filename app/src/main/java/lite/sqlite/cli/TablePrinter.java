@@ -17,13 +17,13 @@ public class TablePrinter {
         }
         
         // Handle message results (like error or update messages)
-        if (tableDto.message != null && !tableDto.message.isEmpty()) {
-            System.out.println(tableDto.message);
+        if (tableDto.getErrorMessage() != null && !tableDto.getErrorMessage().isEmpty()) {
+            System.out.println(tableDto.getErrorMessage());
             return;
         }
         
         // Handle query results
-        if (tableDto.columnNames == null || tableDto.rowValues == null) {
+        if (tableDto.getColumnNames() == null || tableDto.getColumnNames() == null) {
             System.out.println("No data to display");
             return;
         }
@@ -31,16 +31,16 @@ public class TablePrinter {
         List<Integer> columnWidths = calculateColumnWidths(tableDto);
         
         // Print header
-        printRow(tableDto.columnNames, columnWidths);
+        printRow(tableDto.getColumnNames(), columnWidths);
         printSeparator(columnWidths);
         
         // Print rows
-        for (List<String> row : tableDto.rowValues) {
+        for (List<String> row : tableDto.getRowValues()) {
             printRow(row, columnWidths);
         }
         
         // Print row count
-        System.out.println(tableDto.rowValues.size() + " row(s) returned");
+        System.out.println(tableDto.getColumnNames().size() + " row(s) returned");
     }
     
     /**
@@ -53,12 +53,12 @@ public class TablePrinter {
         List<Integer> widths = new ArrayList<>();
         
         // Initialize with header widths
-        for (String columnName : tableDto.columnNames) {
+        for (String columnName : tableDto.getColumnNames()) {
             widths.add(Math.max(columnName.length(), 5));
         }
         
         // Update with data widths
-        for (List<String> row : tableDto.rowValues) {
+        for (List<String> row : tableDto.getRowValues()) {
             for (int i = 0; i < row.size() && i < widths.size(); i++) {
                 String value = row.get(i);
                 if (value != null) {
