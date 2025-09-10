@@ -131,10 +131,39 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitSelect(MySQLStatementParser.SelectContext ctx) {
         commandType = CommandType.QUERY;
-        return super.visitSelect(ctx);
+        selectedFields.clear();
+        
+        String selectText = ctx.getText();
+        System.out.println("DEBUG: Parsing SELECT: " + selectText);
+        
+        try {
+        int selectIndex = selectText.indexOf("SELECT");
+        int fromIndex = selectText.indexOf("FROM");
+        
+        if (selectIndex != -1 && fromIndex != -1 && selectIndex < fromIndex) {
+            String fieldsPart = selectText.substring(selectIndex + 6, fromIndex); 
+            System.out.println("DEBUG: Raw fields part: '" + fieldsPart + "'");
+            
+            if (fieldsPart.contains("*")) {
+                selectedFields.add("*");
+                System.out.println("DEBUG: Added SELECT *");
+            } else {
+                String[] fields = fieldsPart.split("AND");
+                for (String field : fields) {
+                    String cleanField = field.trim();
+                    if (!cleanField.isEmpty()) {
+                        selectedFields.add(cleanField);
+                        System.out.println("DEBUG: Added select field: " + cleanField);
+                    }
+                }
+            }
+        }
+    } catch (Exception e) {
+        System.out.println("DEBUG: Error extracting SELECT fields: " + e.getMessage());
+        selectedFields.add("*"); 
     }
-
-    // Command Attributes for Query & Delete
+    return super.visitSelect(ctx);
+    }
 
     @Override
     public Object visitTableName(MySQLStatementParser.TableNameContext ctx) {
@@ -143,8 +172,9 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitProjection(MySQLStatementParser.ProjectionContext ctx) {
+    public Object visitProjection(MySQLStatementParser.ProjectionContext ctx) {        
         if (ctx.expr() != null) {
+            System.out.println(ctx.expr());
             this.selectedFields.add(ctx.expr().getText());
         }
         return super.visitProjection(ctx);

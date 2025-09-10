@@ -2,6 +2,7 @@ package lite.sqlite.cli;
 
 import java.util.Scanner;
 import lite.sqlite.server.QueryEngine;
+import lite.sqlite.server.impl.QueryEngineImpl;
 import lite.sqlite.cli.TableDto;;
 
 /**
@@ -20,7 +21,7 @@ public class ConsoleCLI implements CLI {
      * @param queryEngine the query engine to use
      */
     public ConsoleCLI(QueryEngine queryEngine) {
-        this.queryEngine = queryEngine;
+        this.queryEngine = new QueryEngineImpl();
         this.tablePrinter = new TablePrinter();
     }
     

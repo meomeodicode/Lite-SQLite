@@ -6,8 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.swing.text.TabExpander;
-
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.server.Parser;
 import lite.sqlite.server.QueryEngine;
@@ -70,6 +68,7 @@ public class QueryEngineImpl implements QueryEngine {
         }
 
         TableDefinition tableDefinition = schema.get(tableName);
+
         List<String> selectedColumns = queryData.getFields();
 
         if  (selectedColumns.isEmpty())
@@ -80,7 +79,7 @@ public class QueryEngineImpl implements QueryEngine {
         List<Integer> columnIndexes = getColumnIndexes(tableDefinition, selectedColumns);
         List<List<Object>> rows = tableData.get(tableName);
         List<List<Object>> filteredRows = applyWhereFilter(rows, tableDefinition, queryData.getPredicate());
-
+        
         List<String> resultColumns = new ArrayList<>();
         List<List<String>> resultRows = new ArrayList<>();
 
@@ -147,6 +146,7 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     private TableDto executeCreateTable(CreateTableData createData) {
+
         String tableName = createData.getTableName();
         System.out.println("DEBUG: CREATE TABLE - Table name: " + tableName);
         System.out.println("DEBUG: CREATE TABLE - Schema: " + createData.getSchema());
