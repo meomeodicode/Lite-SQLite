@@ -2,7 +2,7 @@ package lite.sqlite;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.cli.TablePrinter;
-import lite.sqlite.server.impl.QueryEngineImpl;
+import lite.sqlite.server.queryengine.QueryEngineImpl;
 
 public class DebugParser {
     public static void main(String[] args) {

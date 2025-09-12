@@ -93,22 +93,17 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     @Override
     public Object visitInsert(MySQLStatementParser.InsertContext ctx) {
-        System.out.println("DEBUG: visitInsert called: " + ctx.getText());
         commandType = CommandType.INSERT;
         
         insertFields.clear();
         insertedVals.clear();
         
         String insertText = ctx.getText();
-        System.out.println("DEBUG: Parsing INSERT: " + insertText);
-        
         int firstParen = insertText.indexOf('(');
         int firstCloseParen = insertText.indexOf(')', firstParen);
         
         if (firstParen != -1 && firstCloseParen != -1) {
             String columnsPart = insertText.substring(firstParen + 1, firstCloseParen);
-            System.out.println("DEBUG: Found columns: " + columnsPart);
-            
             String[] columns = columnsPart.split(",");
             for (String column : columns) {
                 String cleanColumn = column.trim();

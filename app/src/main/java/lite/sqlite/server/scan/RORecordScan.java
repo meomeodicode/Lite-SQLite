@@ -1,4 +1,4 @@
-package lite.sqlite.server;
+package lite.sqlite.server.scan;
 
 /**
  * Interface for read-only record scanning.

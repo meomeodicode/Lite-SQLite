@@ -1,6 +1,6 @@
 package lite.sqlite.server.model.domain.clause;
 
-import lite.sqlite.server.RORecordScan;
+import lite.sqlite.server.scan.RORecordScan;
 
 /**
  * Represents an expression in a database query.

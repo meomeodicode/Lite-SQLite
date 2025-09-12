@@ -1,4 +1,4 @@
-package lite.sqlite.server.impl;
+package lite.sqlite.server.queryengine;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -8,8 +8,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.server.Parser;
-import lite.sqlite.server.QueryEngine;
-import lite.sqlite.server.RORecordScan;
 import lite.sqlite.server.model.TableDefinition;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
@@ -17,6 +15,9 @@ import lite.sqlite.server.model.domain.clause.DBTerm;
 import lite.sqlite.server.model.domain.commands.CreateTableData;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
+import lite.sqlite.server.parser.ParserImpl;
+import lite.sqlite.server.scan.RORecordScan;
+import lite.sqlite.server.scan.RORecordScanImpl;
 
 public class QueryEngineImpl implements QueryEngine {
     

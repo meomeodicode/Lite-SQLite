@@ -1,4 +1,4 @@
-package lite.sqlite.server;
+package lite.sqlite.server.queryengine;
 import lite.sqlite.cli.TableDto;
 
 /**

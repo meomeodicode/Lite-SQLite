@@ -1,4 +1,4 @@
-package lite.sqlite.server.impl;
+package lite.sqlite.server.parser;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
@@ -7,7 +7,6 @@ import org.apache.shardingsphere.sql.parser.mysql.parser.MySQLLexer;
 import lite.sqlite.server.Parser;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
-import lite.sqlite.server.parser.MySqlStatementVisitor;
 
 public class ParserImpl implements Parser {
     

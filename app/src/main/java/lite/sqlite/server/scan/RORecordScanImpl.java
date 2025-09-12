@@ -1,8 +1,7 @@
-package lite.sqlite.server.impl;
+package lite.sqlite.server.scan;
 
 import java.util.List;
 
-import lite.sqlite.server.RORecordScan;
 import lite.sqlite.server.model.TableDefinition;
 
 public class RORecordScanImpl implements RORecordScan {

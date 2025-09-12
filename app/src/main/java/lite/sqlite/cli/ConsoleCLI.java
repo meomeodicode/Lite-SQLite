@@ -1,8 +1,9 @@
 package lite.sqlite.cli;
 
 import java.util.Scanner;
-import lite.sqlite.server.QueryEngine;
-import lite.sqlite.server.impl.QueryEngineImpl;
+
+import lite.sqlite.server.queryengine.QueryEngine;
+import lite.sqlite.server.queryengine.QueryEngineImpl;
 import lite.sqlite.cli.TableDto;;
 
 /**
