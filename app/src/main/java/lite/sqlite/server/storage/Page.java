@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.zip.CRC32;
 
+
 public class Page {
     public static final int PAGE_SIZE = 4096; // 4KB - matches hardware page size
     private static final int HEADER_SIZE = 32; // Reserve space for metadata
@@ -177,12 +178,13 @@ public class Page {
         if (offset + data.length > DATA_SIZE) {
             throw new IllegalArgumentException("Read exceeds page boundary");
         }
-        
         buffer.position(HEADER_SIZE + offset);
         buffer.get(data);
     }
-
-    // public booleacn checkDirty() {};
-    // public boolean markDirty() {};
+    
+    ByteBuffer contents() {
+        buffer.position(0);
+        return buffer;
+    }
 
 }

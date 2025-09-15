@@ -10,5 +10,5 @@ public interface FileManager {
     void write(BlockId blockId, Page page) throws IOException;
     BlockId append(String fileName) throws IOException;
     int getBlockCount(String fileName) throws IOException;
-    void close() throws IOException;
+    void close() throws IOException; 
 }
