@@ -27,7 +27,7 @@ public class LRUCache<K,V>  {
             this.key = key;
             this.value = value;
             this.maxHistory = maxHistory;
-            this.accessedTime = new ArrayDeque(maxHistory);
+            this.accessedTime = new ArrayDeque<>(maxHistory);
             recordAccess();
         }
 
@@ -45,21 +45,6 @@ public class LRUCache<K,V>  {
             }
             return accessedTime.peekFirst();
         }
-        public long getLastAccessTime() {
-            if (accessedTime.isEmpty()) {
-                System.out.println("Empty accesses");
-                return 0; 
-            }
-            return accessedTime.peekLast();
-        }
-        
-        public long getOldestAccessTime() {
-            if (accessedTime.isEmpty()) {
-                System.out.println("Empty accesses");
-                return 0; 
-            }
-            return accessedTime.getFirst();
-        }
 
         public long getAccessCount() {
             return accessedTime.size();
@@ -67,7 +52,7 @@ public class LRUCache<K,V>  {
 
         public long getBackwardKDistance(long currentTime) {
             if (accessedTime.size() < maxHistory) {
-                return Long.MAX_VALUE; // +inf for entries with < K accesses
+                return Long.MAX_VALUE;
             }
             return currentTime - getKthAccessTime();
         }
@@ -121,14 +106,6 @@ public class LRUCache<K,V>  {
         }
     }
 
-    public void moveToLast(Node<CacheEntry<K,V>> node) {
-        if (node == null) {
-            throw new RuntimeErrorException(null, "Null pointer");
-        }
-        lruList.removeNode(node);
-        lruList.addLast(node.data);
-    }
-
     public void put(K key, V value) {
         lock.writeLock().lock();
         try {
@@ -139,12 +116,18 @@ public class LRUCache<K,V>  {
                 lruList.moveToLast(existingNode);
                 return;
             }
+            if (lruList.size() >= capacity) {
+                evictLRU();
+            }
             CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key,value, k);
-            lruList.addLast(newEntry);
-            hashTable.put(key, existingNode);
+            Node<CacheEntry<K,V>> newNode = lruList.addLast(newEntry);
+            hashTable.put(key, newNode);     
         }
         catch (Exception e) {
             throw new RuntimeErrorException(null, "Error putting new lru entry");
+        }
+        finally {
+            lock.writeLock().unlock();
         }
     }
 
@@ -153,14 +136,17 @@ public class LRUCache<K,V>  {
             return;
         }
         Node<CacheEntry<K,V>> victim = null;
-        long oldestKthTime = System.currentTimeMillis();
-        long maxAccessGap = Long.MIN_VALUE;
         boolean foundLessThankAccesses = false;
+        long maxAccessGap = Long.MIN_VALUE;
+        long currentTime = System.currentTimeMillis();
         Node<CacheEntry<K,V>> current = lruList.getFirstNode();
         while (current != null) {
             CacheEntry<K,V> entry = current.data;
-            long curKAccessTime = entry.getBackwardKDistance(oldestKthTime);
+            long curKAccessTime = entry.getBackwardKDistance(currentTime);
             if (curKAccessTime > maxAccessGap) {
+                foundLessThankAccesses = true;
+                victim = current;
+                break;
             }
             current = current.getNext();
             if (current == null || current == lruList.getLastNode().getNext()) {
@@ -169,13 +155,13 @@ public class LRUCache<K,V>  {
         }
 
         if (!foundLessThankAccesses) {
+            long victimGap  = Long.MIN_VALUE;
             current = lruList.getFirstNode();
             while (current != null) {
                 CacheEntry<K,V> entry = current.getData();
-                long kthAccessTime = entry.getKthAccessTime();
-                
-                if (victim == null || kthAccessTime < oldestKthTime) {
-                    oldestKthTime = kthAccessTime;
+                long curGap = entry.getBackwardKDistance(currentTime);
+                if (curGap > victimGap) {
+                    victimGap = curGap;
                     victim = current;
                 }
                 
@@ -191,7 +177,66 @@ public class LRUCache<K,V>  {
             CacheEntry<K,V> entry = lruList.removeNode(victim);
             hashTable.remove(entry.key);
         }
-
     }
 
+    public V remove(K key) {
+        lock.writeLock().lock();
+        try {
+            Node<CacheEntry<K,V>> node = hashTable.remove(key);
+            if (node != null) {
+                CacheEntry<K,V> entry = lruList.removeNode(node);
+                return entry.value;
+            }
+            return null;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    public int getHits() { return hits; }
+    public int getMisses() { return misses; }
+    public double getHitRatio() {
+        int total = hits + misses;
+        return total == 0 ? 0 : (double) hits / total * 100.0;
+    }
+    
+    public int size() {
+        return lruList.size();
+    }
+    
+    public void clear() {
+        lock.writeLock().lock();
+        try {
+            lruList.clear();
+            hashTable.clear();
+            hits = 0;
+            misses = 0;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    public void printCacheState() {
+        lock.readLock().lock();
+        try {
+            System.out.println("LRU-" + k + " Cache State:");
+            System.out.printf("Size: %d/%d, Hits: %d, Misses: %d, Hit Ratio: %.2f%%\n", 
+                size(), capacity, hits, misses, getHitRatio());
+            
+            Node<CacheEntry<K,V>> current = lruList.getFirstNode();
+            int position = 0;
+            while (current != null) {
+                CacheEntry<K,V> entry = current.getData();
+                System.out.printf("  [%d] %s (accesses: %d)\n", 
+                    position++, entry.key, entry.getAccessCount());
+                
+                current = current.getNext();
+                if (current == null || current == lruList.getLastNode().getNext()) {
+                    break;
+                }
+            }
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
 }

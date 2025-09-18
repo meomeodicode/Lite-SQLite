@@ -144,14 +144,15 @@ public class DoublyLinkedList<T> implements Iterable<T> {
             return;
         }
         
-        // Remove from current position (don't use removeNode as it decrements size)
         Node<T> prevNode = node.prev;
         Node<T> nextNode = node.next;
         prevNode.next = nextNode;
         nextNode.prev = prevNode;
-        
+
+        Node<T> curNode = node;
+        removeNode(node);
         // Add before tail
-        addNodeBefore(tail, node);
+        addNodeBefore(tail, curNode);
     }
     
     /**
