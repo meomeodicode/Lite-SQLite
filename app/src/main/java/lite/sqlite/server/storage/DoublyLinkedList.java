@@ -83,7 +83,7 @@ public class DoublyLinkedList<T> implements Iterable<T> {
             return null;
         }
         Node<T> firstNode = head.next;
-        removeNode(firstNode);
+        unlinkNode(firstNode);
         return firstNode.data;
     }
     
@@ -96,7 +96,7 @@ public class DoublyLinkedList<T> implements Iterable<T> {
             return null;
         }
         Node<T> lastNode = tail.prev;
-        removeNode(lastNode);
+        unlinkNode(lastNode);
         return lastNode.data;
     }
     
@@ -105,7 +105,7 @@ public class DoublyLinkedList<T> implements Iterable<T> {
      * @param node Node to remove
      * @return The data from removed node
      */
-    public T removeNode(Node<T> node) {
+    public T unlinkNode(Node<T> node) {
         if (node == null || node == head || node == tail) {
             throw new IllegalArgumentException("Cannot remove null or sentinel node");
         }
@@ -116,7 +116,6 @@ public class DoublyLinkedList<T> implements Iterable<T> {
         prevNode.next = nextNode;
         nextNode.prev = prevNode;
         
-        // Clear node references
         node.next = null;
         node.prev = null;
         
@@ -133,26 +132,17 @@ public class DoublyLinkedList<T> implements Iterable<T> {
             return;
         }
         
-        // Remove from current position
-        removeNode(node);
-        // Add after head
-        addNodeAfter(head, node);
+        Node<T> curNode = node;
+        unlinkNode(node);
+        addNodeAfter(head, curNode);
     }
     
     public void moveToLast(Node<T> node) {
         if (node == null || node == head || node == tail) {
             return;
         }
-        
-        Node<T> prevNode = node.prev;
-        Node<T> nextNode = node.next;
-        prevNode.next = nextNode;
-        nextNode.prev = prevNode;
-
-        Node<T> curNode = node;
-        removeNode(node);
-        // Add before tail
-        addNodeBefore(tail, curNode);
+        unlinkNode(node);
+        addNodeBefore(tail, node);
     }
     
     /**

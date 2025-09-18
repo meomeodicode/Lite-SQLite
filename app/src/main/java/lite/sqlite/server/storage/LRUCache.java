@@ -1,18 +1,11 @@
 package lite.sqlite.server.storage;
 
-import java.security.Timestamp;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.management.RuntimeErrorException;
-
-import org.checkerframework.checker.units.qual.t;
-import org.codehaus.groovy.runtime.metaclass.MetaMethodIndex.CacheEntry;
-
-import com.github.benmanes.caffeine.cache.Cache;
-
 import lite.sqlite.server.storage.DoublyLinkedList.Node;
 
 public class LRUCache<K,V>  {
@@ -165,7 +158,6 @@ public class LRUCache<K,V>  {
                     victim = current;
                 }
                 
-                // Move to next node
                 current = current.getNext();
                 if (current == null || current == lruList.getLastNode().getNext()) {
                     break;
@@ -174,7 +166,7 @@ public class LRUCache<K,V>  {
         }
 
         if (victim != null) {
-            CacheEntry<K,V> entry = lruList.removeNode(victim);
+            CacheEntry<K,V> entry = lruList.unlinkNode(victim);
             hashTable.remove(entry.key);
         }
     }
@@ -184,7 +176,7 @@ public class LRUCache<K,V>  {
         try {
             Node<CacheEntry<K,V>> node = hashTable.remove(key);
             if (node != null) {
-                CacheEntry<K,V> entry = lruList.removeNode(node);
+                CacheEntry<K,V> entry = lruList.unlinkNode(node);
                 return entry.value;
             }
             return null;
