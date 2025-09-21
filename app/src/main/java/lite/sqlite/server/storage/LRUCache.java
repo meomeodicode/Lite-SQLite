@@ -1,234 +1,155 @@
-package lite.sqlite.server.storage;
+package lite.sqlite.server.storage.buffer;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import javax.management.RuntimeErrorException;
-import lite.sqlite.server.storage.DoublyLinkedList.Node;
+import lite.sqlite.server.storage.BlockId;
+import lite.sqlite.server.storage.Frame;
+import lite.sqlite.server.storage.LRUCache;
+import lite.sqlite.server.storage.Page;
+import lite.sqlite.server.storage.filemanager.FileManager;
 
-public class LRUCache<K,V>  {
+public class BufferPool {
 
-    private static class CacheEntry<K,V> {
-        K key;
-        V value;
-        Deque<Long> accessedTime;
-        int maxHistory = 0;
+    private final int poolCapacity;
+    private final FileManager fManager;
+    private final LRUCache<BlockId, Frame> cache;
+    private final Deque<Frame> freeFrames;
+    private final ReentrantReadWriteLock lock; 
 
-        CacheEntry(K key, V value, int maxHistory) {
-            this.key = key;
-            this.value = value;
-            this.maxHistory = maxHistory;
-            this.accessedTime = new ArrayDeque<>(maxHistory);
-            recordAccess();
-        }
-
-        public void recordAccess() {
-            long accessTime = System.currentTimeMillis();
-            if (accessedTime.size() >= maxHistory) {
-                accessedTime.removeFirst();
-            }
-            accessedTime.addLast(accessTime);
-        }
-
-        public long getKthAccessTime() {
-            if (accessedTime.isEmpty()) {
-                return 0;
-            }
-            return accessedTime.peekFirst();
-        }
-
-        public long getAccessCount() {
-            return accessedTime.size();
-        }
-
-        public long getBackwardKDistance(long currentTime) {
-            if (accessedTime.size() < maxHistory) {
-                return Long.MAX_VALUE;
-            }
-            return currentTime - getKthAccessTime();
-        }
-
-         @Override
-        public String toString() {
-            return String.format("LRUKEntry{%s -> %s, accesses=%d, kthTime=%d}", 
-                               key, value, getAccessCount(), getKthAccessTime());
-        }
-    }
-    private final DoublyLinkedList<CacheEntry<K,V>> lruList;
-    private final ConcurrentHashMap<K, Node<CacheEntry<K,V>>> hashTable;
-    private int capacity;
-    private final int k;
-    private final ReentrantReadWriteLock lock;
-
-    int hits = 0, misses = 0;
-    public LRUCache(int capacity, int k) {
-        if (capacity < 0) {
-            throw new RuntimeErrorException(null, "Invalid capacity");
-        } 
-        if (k<=0) {
-            throw new IllegalArgumentException("Negative k", null);
-        }
-        this.k = k;
-        this.capacity = capacity;
-        this.lruList = new DoublyLinkedList<>();
-        this.hashTable = new ConcurrentHashMap<>(capacity);
+    public BufferPool(int poolCapacity, FileManager fManager) {
+        this.poolCapacity = poolCapacity;
+        this.fManager = fManager;
+        this.cache = new LRUCache<>(poolCapacity, 2); // LRU-2 is good for databases
+        this.freeFrames = new ArrayDeque<>(poolCapacity);
         this.lock = new ReentrantReadWriteLock();
+        
+        // Initialize free frames
+        for (int i = 0; i < poolCapacity; i++) {
+            freeFrames.push(new Frame());
+        }
     }
 
-    public V get(K key) {
+    public Page pinBlock(BlockId blockId) throws IOException {
         lock.writeLock().lock();
         try {
-            Node<CacheEntry<K,V>> node = hashTable.get(key);
-            if (node == null) {
-                misses++;
-                return null;
+            Frame frame = cache.get(blockId);
+            
+            if (frame != null) {
+                // Cache hit - your LRUCache already updated position and recorded access
+                frame.pin();
+                return frame.getPage();
             }
-            hits++;
-            V nodeValue = node.data.value;
-            lruList.moveToLast(node);
-            node.data.recordAccess();
-            return nodeValue;
-        }
-        catch (Exception e) {
-            // throw new RuntimeErrorException(e, "Get error LRU cache");
-            return null;
-        } finally {
-            lock.writeLock().unlock();
-        }
-    }
-
-    public void put(K key, V value) {
-        lock.writeLock().lock();
-        try {
-            Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
-            if (existingNode != null) {
-                existingNode.data.value = value;
-                existingNode.data.recordAccess();
-                lruList.moveToLast(existingNode);
-                return;
-            }
-            if (lruList.size() >= capacity) {
-                evictLRU();
-            }
-            CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key,value, k);
-            Node<CacheEntry<K,V>> newNode = lruList.addLast(newEntry);
-            hashTable.put(key, newNode);     
-        }
-        catch (Exception e) {
-            throw new RuntimeErrorException(null, "Error putting new lru entry");
-        }
-        finally {
-            lock.writeLock().unlock();
-        }
-    }
-
-    private void evictLRU() {
-        if (lruList.isEmpty()) {
-            return;
-        }
-        Node<CacheEntry<K,V>> victim = null;
-        boolean foundLessThankAccesses = false;
-        long maxAccessGap = Long.MIN_VALUE;
-        long currentTime = System.currentTimeMillis();
-        Node<CacheEntry<K,V>> current = lruList.getFirstNode();
-        while (current != null) {
-            CacheEntry<K,V> entry = current.data;
-            long curKAccessTime = entry.getBackwardKDistance(currentTime);
-            if (curKAccessTime > maxAccessGap) {
-                foundLessThankAccesses = true;
-                victim = current;
-                break;
-            }
-            current = current.getNext();
-            if (current == null || current == lruList.getLastNode().getNext()) {
-                break; 
-            }
-        }
-
-        if (!foundLessThankAccesses) {
-            long victimGap  = Long.MIN_VALUE;
-            current = lruList.getFirstNode();
-            while (current != null) {
-                CacheEntry<K,V> entry = current.getData();
-                long curGap = entry.getBackwardKDistance(currentTime);
-                if (curGap > victimGap) {
-                    victimGap = curGap;
-                    victim = current;
-                }
-                
-                current = current.getNext();
-                if (current == null || current == lruList.getLastNode().getNext()) {
-                    break;
-                }
-            }
-        }
-
-        if (victim != null) {
-            CacheEntry<K,V> entry = lruList.unlinkNode(victim);
-            hashTable.remove(entry.key);
-        }
-    }
-
-    public V remove(K key) {
-        lock.writeLock().lock();
-        try {
-            Node<CacheEntry<K,V>> node = hashTable.remove(key);
-            if (node != null) {
-                CacheEntry<K,V> entry = lruList.unlinkNode(node);
-                return entry.value;
-            }
-            return null;
-        } finally {
-            lock.writeLock().unlock();
-        }
-    }
-
-    public int getHits() { return hits; }
-    public int getMisses() { return misses; }
-    public double getHitRatio() {
-        int total = hits + misses;
-        return total == 0 ? 0 : (double) hits / total * 100.0;
-    }
-    
-    public int size() {
-        return lruList.size();
-    }
-    
-    public void clear() {
-        lock.writeLock().lock();
-        try {
-            lruList.clear();
-            hashTable.clear();
-            hits = 0;
-            misses = 0;
+            
+            // Cache miss - allocate frame and load from disk
+            frame = allocateFrame();
+            
+            // Load page from disk
+            Page page = new Page(blockId.getBlockNum());
+            fManager.read(blockId, page);
+            
+            // Set up frame
+            frame.setBlockId(blockId);
+            frame.setPage(page);
+            frame.pin();
+            
+            // Put in cache - your evictLRU() will be called automatically if needed
+            cache.put(blockId, frame);
+            
+            return page;
+            
         } finally {
             lock.writeLock().unlock();
         }
     }
     
-    public void printCacheState() {
+    public void unpinBlock(BlockId blockId) {
+        lock.writeLock().lock();
+        try {
+            Frame frame = cache.get(blockId);
+            if (frame != null) {
+                frame.unpin();
+                // get() already updated LRU position
+            }
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    public void flushBlock(BlockId blockId) throws IOException {
         lock.readLock().lock();
         try {
-            System.out.println("LRU-" + k + " Cache State:");
-            System.out.printf("Size: %d/%d, Hits: %d, Misses: %d, Hit Ratio: %.2f%%\n", 
-                size(), capacity, hits, misses, getHitRatio());
-            
-            Node<CacheEntry<K,V>> current = lruList.getFirstNode();
-            int position = 0;
-            while (current != null) {
-                CacheEntry<K,V> entry = current.getData();
-                System.out.printf("  [%d] %s (accesses: %d)\n", 
-                    position++, entry.key, entry.getAccessCount());
-                
-                current = current.getNext();
-                if (current == null || current == lruList.getLastNode().getNext()) {
-                    break;
-                }
+            Frame frame = cache.get(blockId);
+            if (frame != null && frame.getPage().isDirty()) {
+                fManager.write(blockId, frame.getPage());
+                frame.getPage().markClean();
             }
         } finally {
             lock.readLock().unlock();
+        }
+    }
+    
+    public void flushAll() throws IOException {
+        // Since your LRUCache doesn't expose iteration over values,
+        // we'll need to handle this differently or add a method to LRUCache
+        System.out.println("Flushing all dirty pages...");
+        // TODO: Consider adding getAllEntries() method to LRUCache
+    }
+    
+    private Frame allocateFrame() throws IOException {
+        // Try free frames first
+        if (!freeFrames.isEmpty()) {
+            return freeFrames.pop();
+        }
+        
+        // No free frames - create new one
+        // Your LRUCache.put() will handle eviction automatically
+        return new Frame();
+    }
+    
+    // Delegate statistics to your LRUCache
+    public double getHitRatio() {
+        return cache.getHitRatio() / 100.0; // Convert from percentage to ratio
+    }
+    
+    public int getHits() {
+        return cache.getHits();
+    }
+    
+    public int getMisses() {
+        return cache.getMisses();
+    }
+    
+    public int getPoolSize() {
+        return poolCapacity;
+    }
+    
+    public int getUsedFrames() {
+        return cache.size();
+    }
+    
+    public int getFreeFrames() {
+        return freeFrames.size();
+    }
+    
+    public void printStatistics() {
+        System.out.println("Buffer Pool Statistics:");
+        System.out.println("  Pool Capacity: " + poolCapacity);
+        System.out.println("  Free Frames: " + getFreeFrames());
+        
+        // Use your LRUCache's detailed statistics
+        cache.printCacheState();
+    }
+    
+    public void close() throws IOException {
+        lock.writeLock().lock();
+        try {
+            cache.clear();
+            freeFrames.clear();
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 }

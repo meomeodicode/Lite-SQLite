@@ -57,10 +57,18 @@ public class Frame {
         return blockId;
     }
     
+    public void setBlockId(BlockId blockId) {
+        this.blockId = blockId;
+    }
+
     // Page access
     public Page getPage() {
         lastAccessTime = System.currentTimeMillis();
         return page;
+    }
+
+    public void setPage(Page page) {
+        this.page = page;
     }
     
     public long getLastAccessTime() {
