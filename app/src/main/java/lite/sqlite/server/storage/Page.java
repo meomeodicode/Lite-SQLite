@@ -86,7 +86,7 @@ public class Page {
     
     public void markDirty() {
         this.dirty = true;
-        updateCheckSum(); // Update checksum when page is modified
+        updateCheckSum(); 
     }
 
     private void initializeHeader() {
@@ -182,9 +182,24 @@ public class Page {
         buffer.get(data);
     }
     
-    ByteBuffer contents() {
+    public ByteBuffer contents() {
         buffer.position(0);
         return buffer;
+    }
+    
+    public int getInt(int offset) {
+        if (offset + 4 > DATA_SIZE) {
+            throw new IllegalArgumentException("Offset exceeds page data boundary");
+        }
+        return buffer.getInt(HEADER_SIZE + offset);
+    }
+    
+    public void setInt(int offset, int value) {
+        if (offset + 4 > DATA_SIZE) {
+            throw new IllegalArgumentException("Offset exceeds page data boundary");
+        }
+        buffer.putInt(HEADER_SIZE + offset, value);
+        markDirty();
     }
 
 }

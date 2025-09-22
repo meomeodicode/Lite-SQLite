@@ -3,19 +3,18 @@ package lite.sqlite.server.storage;
 public class Frame {
     private BlockId blockId;          
     private Page page;              
-    private int pinCount;            
+    private int pinCount = 0;            
     private boolean dirty;            
     private long lastAccessTime;     
     
     public Frame() {
-        this.page = null;  // Create page when needed
+        this.page = null;  
         this.pinCount = 0;
         this.dirty = false;
         this.blockId = null;
         this.lastAccessTime = System.currentTimeMillis();
     }
     
-    // Pin/Unpin methods
     public void pin() {
         pinCount++;
         lastAccessTime = System.currentTimeMillis();
@@ -44,10 +43,8 @@ public class Frame {
         return dirty;
     }
     
-    // Block assignment
     public void assignToBlock(BlockId blockId) {
         this.blockId = blockId;
-        // Create page when assigned to block
         if (this.page == null) {
             this.page = new Page(blockId.getBlockNum());
         }
@@ -61,7 +58,6 @@ public class Frame {
         this.blockId = blockId;
     }
 
-    // Page access
     public Page getPage() {
         lastAccessTime = System.currentTimeMillis();
         return page;
@@ -75,16 +71,11 @@ public class Frame {
         return lastAccessTime;
     }
     
-    /**
-     * Check if this frame is available for replacement
-     */
+
     public boolean isReplaceable() {
         return pinCount == 0;
     }
     
-    /**
-     * Reset frame to empty state
-     */
     public void reset() {
         this.blockId = null;
         this.page = null;

@@ -4,7 +4,7 @@ public class BlockId {
     private String filename;
     private int blockNum;
 
-    BlockId (String filename, int blockNum) {
+    public BlockId (String filename, int blockNum) {
         this.filename = filename;
         this.blockNum = blockNum;
     }
