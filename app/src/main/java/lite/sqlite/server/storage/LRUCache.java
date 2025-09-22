@@ -1,7 +1,9 @@
 package lite.sqlite.server.storage;
+package lite.sqlite.server.storage;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -75,9 +77,22 @@ public class LRUCache<K,V>  {
         this.capacity = capacity;
         this.lruList = new DoublyLinkedList<>();
         this.hashTable = new ConcurrentHashMap<>(capacity);
+    int hits = 0, misses = 0;
+    public LRUCache(int capacity, int k) {
+        if (capacity < 0) {
+            throw new RuntimeErrorException(null, "Invalid capacity");
+        } 
+        if (k<=0) {
+            throw new IllegalArgumentException("Negative k", null);
+        }
+        this.k = k;
+        this.capacity = capacity;
+        this.lruList = new DoublyLinkedList<>();
+        this.hashTable = new ConcurrentHashMap<>(capacity);
         this.lock = new ReentrantReadWriteLock();
     }
 
+    public V get(K key) {
     public V get(K key) {
         lock.writeLock().lock();
         try {
@@ -85,7 +100,20 @@ public class LRUCache<K,V>  {
             if (node == null) {
                 misses++;
                 return null;
+            Node<CacheEntry<K,V>> node = hashTable.get(key);
+            if (node == null) {
+                misses++;
+                return null;
             }
+            hits++;
+            V nodeValue = node.data.value;
+            lruList.moveToLast(node);
+            node.data.recordAccess();
+            return nodeValue;
+        }
+        catch (Exception e) {
+            // throw new RuntimeErrorException(e, "Get error LRU cache");
+            return null;
             hits++;
             V nodeValue = node.data.value;
             lruList.moveToLast(node);
@@ -101,8 +129,28 @@ public class LRUCache<K,V>  {
     }
 
     public void put(K key, V value) {
+
+    public void put(K key, V value) {
         lock.writeLock().lock();
         try {
+            Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
+            if (existingNode != null) {
+                existingNode.data.value = value;
+                existingNode.data.recordAccess();
+                lruList.moveToLast(existingNode);
+                return;
+            }
+            if (lruList.size() >= capacity) {
+                evictLRU();
+            }
+            CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key,value, k);
+            Node<CacheEntry<K,V>> newNode = lruList.addLast(newEntry);
+            hashTable.put(key, newNode);     
+        }
+        catch (Exception e) {
+            throw new RuntimeErrorException(null, "Error putting new lru entry");
+        }
+        finally {
             Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
             if (existingNode != null) {
                 existingNode.data.value = value;
@@ -236,11 +284,15 @@ public class LRUCache<K,V>  {
             hashTable.clear();
             hits = 0;
             misses = 0;
+            lruList.clear();
+            hashTable.clear();
+            hits = 0;
+            misses = 0;
         } finally {
             lock.writeLock().unlock();
         }
     }
-    
+       
     public void printCacheState() {
         lock.readLock().lock();
         try {
