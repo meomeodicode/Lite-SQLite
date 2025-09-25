@@ -1,10 +1,10 @@
 package lite.sqlite.server.storage;
 
-public class BlockId {
+public class Block {
     private String filename;
     private int blockNum;
 
-    public BlockId (String filename, int blockNum) {
+    public Block (String filename, int blockNum) {
         this.filename = filename;
         this.blockNum = blockNum;
     }
@@ -19,7 +19,7 @@ public class BlockId {
 
     @Override
     public boolean equals(Object anotherBlock) {
-        BlockId blk = (BlockId) anotherBlock;
+        Block blk = (Block) anotherBlock;
         return blk.getFileName().equals(this.filename) && blk.getBlockNum() == this.blockNum; 
     }
 

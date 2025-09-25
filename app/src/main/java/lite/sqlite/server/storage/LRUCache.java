@@ -1,9 +1,7 @@
 package lite.sqlite.server.storage;
-package lite.sqlite.server.storage;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -11,8 +9,7 @@ import java.util.function.Consumer;
 import javax.management.RuntimeErrorException;
 import lite.sqlite.server.storage.DoublyLinkedList.Node;
 
-public class LRUCache<K,V>  {
-
+public class LRUCache<K,V> {
     private static class CacheEntry<K,V> {
         K key;
         V value;
@@ -53,36 +50,26 @@ public class LRUCache<K,V>  {
             return currentTime - getKthAccessTime();
         }
 
-         @Override
+        @Override
         public String toString() {
             return String.format("LRUKEntry{%s -> %s, accesses=%d, kthTime=%d}", 
                                key, value, getAccessCount(), getKthAccessTime());
         }
     }
+
     private final DoublyLinkedList<CacheEntry<K,V>> lruList;
     private final ConcurrentHashMap<K, Node<CacheEntry<K,V>>> hashTable;
     private int capacity;
     private final int k;
     private final ReentrantReadWriteLock lock;
+    
+    int hits = 0, misses = 0;
 
-    int hits = 0, misses = 0;
     public LRUCache(int capacity, int k) {
         if (capacity < 0) {
             throw new RuntimeErrorException(null, "Invalid capacity");
         } 
-        if (k<=0) {
-            throw new IllegalArgumentException("Negative k", null);
-        }
-        this.k = k;
-        this.capacity = capacity;
-        this.lruList = new DoublyLinkedList<>();
-        this.hashTable = new ConcurrentHashMap<>(capacity);
-    int hits = 0, misses = 0;
-    public LRUCache(int capacity, int k) {
-        if (capacity < 0) {
-            throw new RuntimeErrorException(null, "Invalid capacity");
-        } 
-        if (k<=0) {
+        if (k <= 0) {
             throw new IllegalArgumentException("Negative k", null);
         }
         this.k = k;
@@ -93,34 +80,20 @@ public class LRUCache<K,V>  {
     }
 
     public V get(K key) {
-    public V get(K key) {
         lock.writeLock().lock();
         try {
             Node<CacheEntry<K,V>> node = hashTable.get(key);
             if (node == null) {
                 misses++;
                 return null;
-            Node<CacheEntry<K,V>> node = hashTable.get(key);
-            if (node == null) {
-                misses++;
-                return null;
             }
+            
             hits++;
             V nodeValue = node.data.value;
             lruList.moveToLast(node);
             node.data.recordAccess();
             return nodeValue;
-        }
-        catch (Exception e) {
-            // throw new RuntimeErrorException(e, "Get error LRU cache");
-            return null;
-            hits++;
-            V nodeValue = node.data.value;
-            lruList.moveToLast(node);
-            node.data.recordAccess();
-            return nodeValue;
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             // throw new RuntimeErrorException(e, "Get error LRU cache");
             return null;
         } finally {
@@ -129,8 +102,6 @@ public class LRUCache<K,V>  {
     }
 
     public void put(K key, V value) {
-
-    public void put(K key, V value) {
         lock.writeLock().lock();
         try {
             Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
@@ -140,49 +111,31 @@ public class LRUCache<K,V>  {
                 lruList.moveToLast(existingNode);
                 return;
             }
+            
             if (lruList.size() >= capacity) {
-                evictLRU();
+                evict();
             }
-            CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key,value, k);
+            
+            CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key, value, k);
             Node<CacheEntry<K,V>> newNode = lruList.addLast(newEntry);
             hashTable.put(key, newNode);     
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             throw new RuntimeErrorException(null, "Error putting new lru entry");
-        }
-        finally {
-            Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
-            if (existingNode != null) {
-                existingNode.data.value = value;
-                existingNode.data.recordAccess();
-                lruList.moveToLast(existingNode);
-                return;
-            }
-            if (lruList.size() >= capacity) {
-                evictLRU();
-            }
-            CacheEntry<K,V> newEntry = new CacheEntry<K,V>(key,value, k);
-            Node<CacheEntry<K,V>> newNode = lruList.addLast(newEntry);
-            hashTable.put(key, newNode);     
-        }
-        catch (Exception e) {
-            throw new RuntimeErrorException(null, "Error putting new lru entry");
-        }
-        finally {
+        } finally {
             lock.writeLock().unlock();
         }
     }
 
-    private void evictLRU() {
+    public Object[] evict() {
         if (lruList.isEmpty()) {
-            return;
+            return null;
         }
+        
         Node<CacheEntry<K,V>> victim = null;
-        boolean foundLessThankAccesses = false;
         long oldestAccessTime = Long.MAX_VALUE;
         long currentTime = System.currentTimeMillis();
+        
         Node<CacheEntry<K,V>> current = lruList.getFirstNode();
-
         while (current != null) {
             CacheEntry<K,V> entry = current.data;
             boolean pinned = false;
@@ -190,6 +143,7 @@ public class LRUCache<K,V>  {
                 Frame frame = (Frame) entry.value;
                 pinned = frame.isPinned();
             }
+            
             if (!pinned && entry.getAccessCount() < k) {
                 long curAccessTime = entry.getKthAccessTime();
                 if (victim == null || curAccessTime < oldestAccessTime) {
@@ -197,13 +151,14 @@ public class LRUCache<K,V>  {
                     oldestAccessTime = curAccessTime;
                 }
             }
+            
             current = current.getNext();
             if (current == null || current == lruList.getLastNode().getNext()) {
                 break; 
             }
         }
 
-        if (!foundLessThankAccesses) {
+        if (victim == null) {
             current = lruList.getFirstNode();
             while (current != null) {
                 CacheEntry<K,V> entry = current.getData();
@@ -212,9 +167,10 @@ public class LRUCache<K,V>  {
                     Frame frame = (Frame) entry.value;
                     pinned = frame.isPinned();
                 }
+                
                 if (!pinned) {
                     long curAccessTime = entry.getBackwardKDistance(currentTime);
-                    if (victim == null || curAccessTime < oldestAccessTime) {
+                    if (victim == null || curAccessTime > oldestAccessTime) {
                         victim = current;
                         oldestAccessTime = curAccessTime;
                     }
@@ -228,9 +184,14 @@ public class LRUCache<K,V>  {
         }
 
         if (victim != null) {
-            CacheEntry<K,V> entry = lruList.unlinkNode(victim);
+            CacheEntry<K,V> entry = victim.data;
+            K key = entry.key;
+            V value = entry.value;
+            lruList.unlinkNode(victim);
             hashTable.remove(entry.key);
+            return new Object[] {key, value};
         }
+        return null;
     }
 
     public V remove(K key) {
@@ -248,22 +209,22 @@ public class LRUCache<K,V>  {
     }
 
     public void forEachValue(Consumer<V> action) {
-    lock.readLock().lock();
-    try {
-        Node<CacheEntry<K,V>> current = lruList.getFirstNode();
-        
-        while (current != null) {
-            CacheEntry<K,V> entry = current.getData();
-            action.accept(entry.value);
+        lock.readLock().lock();
+        try {
+            Node<CacheEntry<K,V>> current = lruList.getFirstNode();
             
-            current = current.getNext();
-            if (current == null || current == lruList.getLastNode().getNext()) {
-                break;
+            while (current != null) {
+                CacheEntry<K,V> entry = current.getData();
+                action.accept(entry.value);
+                
+                current = current.getNext();
+                if (current == null || current == lruList.getLastNode().getNext()) {
+                    break;
+                }
             }
+        } finally {
+            lock.readLock().unlock();
         }
-    } finally {
-        lock.readLock().unlock();
-    }
     }   
 
     public int getHits() { return hits; }
@@ -280,10 +241,6 @@ public class LRUCache<K,V>  {
     public void clear() {
         lock.writeLock().lock();
         try {
-            lruList.clear();
-            hashTable.clear();
-            hits = 0;
-            misses = 0;
             lruList.clear();
             hashTable.clear();
             hits = 0;
@@ -316,4 +273,5 @@ public class LRUCache<K,V>  {
             lock.readLock().unlock();
         }
     }
+
 }

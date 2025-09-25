@@ -5,7 +5,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import lite.sqlite.server.storage.BlockId;
+
+import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.Frame;
 import lite.sqlite.server.storage.LRUCache;
 import lite.sqlite.server.storage.Page;
@@ -15,7 +16,7 @@ public class BufferPool {
 
     private final int poolCapacity;
     private final FileManager fManager;
-    private final LRUCache<BlockId, Frame> cache;
+    private final LRUCache<Block, Frame> cache;
     private final Deque<Frame> freeFrames;
     private final ReentrantReadWriteLock lock; 
 
@@ -31,10 +32,10 @@ public class BufferPool {
         }
     }
 
-    public Page pinBlock(BlockId blockId) throws IOException {
+    public Page pinBlock(Block block) throws IOException {
         lock.writeLock().lock();
         try {
-            Frame frame = cache.get(blockId);
+            Frame frame = cache.get(block);
             
             if (frame != null) {
                 frame.pin();
@@ -42,13 +43,13 @@ public class BufferPool {
             }
             
             frame = allocateFrame();
-            Page page = new Page(blockId.getBlockNum());
-            fManager.read(blockId, page);
-            frame.setBlockId(blockId);
+            Page page = new Page();
+            fManager.read(block, page);
+            frame.setBlockId(block); 
             frame.setPage(page);
             frame.pin();
-            cache.put(blockId, frame);
-            System.out.println("WARN: No free frames available, relying on cache eviction.");
+            cache.put(block, frame);
+            
             return page;
             
         } finally {
@@ -56,7 +57,7 @@ public class BufferPool {
         }
     }
     
-    public void unpinBlock(BlockId blockId) {
+    public void unpinBlock(Block blockId) {
         lock.writeLock().lock();
         try {
             Frame frame = cache.get(blockId);
@@ -68,13 +69,13 @@ public class BufferPool {
         }
     }
     
-    public void flushBlock(BlockId blockId) throws IOException {
+    public void flushBlock(Block blockId) throws IOException {
         lock.readLock().lock();
         try {
             Frame frame = cache.get(blockId);
-            if (frame != null && frame.getPage().isDirty()) {
+            if (frame != null && frame.isDirty()) {
                 fManager.write(blockId, frame.getPage());
-                frame.getPage().markClean();
+                frame.setDirty(false);
             }
         } finally {
             lock.readLock().unlock();
@@ -85,10 +86,10 @@ public class BufferPool {
         lock.writeLock().lock();
         try {
             cache.forEachValue(frame -> {
-                if (frame.getPage().isDirty()) {
+                if (frame.isDirty()) {
                     try {
                         fManager.write(frame.getBlockId(), frame.getPage());
-                        frame.getPage().markClean();
+                        frame.setDirty(false);
                     } catch (IOException e) {
                         throw new RuntimeException("Failed to flush frame", e);
                     }
@@ -98,14 +99,41 @@ public class BufferPool {
         finally {
             lock.writeLock().unlock();
         }
-
     }
     
+    public void markDirtyBlock(Block block) {
+        lock.writeLock().lock();
+        try {
+            Frame frame = cache.get(block);
+            if (frame != null) {
+                frame.setDirty(true);
+            }
+        }
+        finally {
+            lock.writeLock().unlock();
+        }
+    }
+
     private Frame allocateFrame() throws IOException {
+        
         if (!freeFrames.isEmpty()) {
             return freeFrames.pop();
         }
-        return new Frame();
+        
+        Object[] victim = cache.evict();
+        if (victim != null) {
+            Block victimBlock = (Block) victim[0];
+            Frame victimFrame = (Frame) victim[1];
+            markDirtyBlock(victimBlock);
+            if (victimFrame.isDirty()) {
+                fManager.write(victimBlock, victimFrame.getPage());
+                victimFrame.setDirty(true);
+            }
+            victimFrame.reset();
+            return victimFrame;
+        }
+        
+        throw new RuntimeException("No unpinned frames available");
     }
     
     public double getHitRatio() {

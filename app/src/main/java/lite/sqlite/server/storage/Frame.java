@@ -1,7 +1,7 @@
 package lite.sqlite.server.storage;
 
 public class Frame {
-    private BlockId blockId;          
+    private Block blockId;          
     private Page page;              
     private int pinCount = 0;            
     private boolean dirty;            
@@ -34,7 +34,6 @@ public class Frame {
         return pinCount;
     }
     
-    // Dirty flag management
     public void setDirty(boolean dirty) {
         this.dirty = dirty;
     }
@@ -43,18 +42,18 @@ public class Frame {
         return dirty;
     }
     
-    public void assignToBlock(BlockId blockId) {
+    public void assignToBlock(Block blockId) {
         this.blockId = blockId;
         if (this.page == null) {
-            this.page = new Page(blockId.getBlockNum());
+            this.page = new Page();
         }
     }
     
-    public BlockId getBlockId() {
+    public Block getBlockId() {
         return blockId;
     }
     
-    public void setBlockId(BlockId blockId) {
+    public void setBlockId(Block blockId) {
         this.blockId = blockId;
     }
 

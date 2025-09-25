@@ -31,7 +31,7 @@ public class BasicFileManager implements FileManager {
     }
 
     @Override 
-    public synchronized void read(BlockId blockId, Page page) throws IOException {
+    public synchronized void read(Block blockId, Page page) throws IOException {
         try {
             RandomAccessFile file = getFile(blockId.getFileName());
             long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE; // Use Page.PAGE_SIZE!
@@ -47,26 +47,24 @@ public class BasicFileManager implements FileManager {
     }
 
     @Override
-    public synchronized void write(BlockId blockId, Page page) throws IOException {
+    public synchronized void write(Block blockId, Page page) throws IOException {
         try {
             RandomAccessFile file = getFile(blockId.getFileName());
             long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE; // Use Page.PAGE_SIZE!
             file.seek(position);
             
             page.contents().rewind(); // Reset buffer for writing
-            file.getChannel().write(page.contents());
-            page.markClean();
-            
+            file.getChannel().write(page.contents());            
         } catch (IOException e) {
             throw new RuntimeException("Cannot write block " + blockId, e);
         }
     }
 
     @Override
-    public synchronized BlockId append(String fileName) throws IOException {
+    public synchronized Block append(String fileName) throws IOException {
         try {
             int newBlockNum = getBlockCount(fileName); // Get current block count
-            BlockId newBlock = new BlockId(fileName, newBlockNum);
+            Block newBlock = new Block(fileName, newBlockNum);
             
             RandomAccessFile file = getFile(fileName);
             long position = (long) newBlockNum * Page.PAGE_SIZE; // Use PAGE_SIZE!

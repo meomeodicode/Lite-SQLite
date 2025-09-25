@@ -56,21 +56,19 @@ public class Schema {
         return names;
     }
     
-    /**
-     * Calculate the size needed to store a record with this schema
-     */
+
     public int calculateRecordSize(Object[] record) {
         int size = 0;
         for (int i = 0; i < columns.size(); i++) {
             Column column = columns.get(i);
             switch (column.getType()) {
                 case INTEGER:
-                    size += 4; // 4 bytes for int
+                    size += 4; 
                     break;
                 case VARCHAR:
                     String strValue = i < record.length && record[i] != null ? 
                                     record[i].toString() : "";
-                    size += 1 + Math.min(strValue.getBytes().length, 255); // 1 byte length + data
+                    size += 1 + Math.min(strValue.getBytes().length, 255); 
                     break;
             }
         }
