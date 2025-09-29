@@ -23,13 +23,15 @@ public class TableDto {
         this.errorMessage = message;
     }
     
-    // Static factory methods
     public static TableDto forError(String errorMessage) {
         return new TableDto("ERROR: " + errorMessage);
     }
     
     public static TableDto forUpdateResult(int affectedRows) {
-        return new TableDto(affectedRows + " row(s) affected");
-    }
+        return new TableDto(List.of("result"), List.of(List.of(affectedRows + " row(s) affected")));
+    } 
     
+    public List<List<String>> getRows() {
+        return rowValues;
+    } 
 }

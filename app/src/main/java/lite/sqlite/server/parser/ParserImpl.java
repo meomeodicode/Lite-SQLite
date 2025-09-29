@@ -5,7 +5,6 @@ import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
 import org.apache.shardingsphere.sql.parser.mysql.parser.MySQLLexer;
 
 import lite.sqlite.server.Parser;
-import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
 
 public class ParserImpl implements Parser {

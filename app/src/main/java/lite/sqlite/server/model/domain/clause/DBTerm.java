@@ -44,17 +44,10 @@ public class DBTerm {
         this.rhsField = rhs;
     }
     
-    /**
-     * Checks if the term is satisfied by the current record in the scan.
-     * 
-     * @param s the record scan
-     * @return true if the term is satisfied, false otherwise
-     */
     public boolean isSatisfied(RORecordScan s) {
         if (!s.hasField(lhsField))
             return false;
         
-        // If field-to-field comparison
         if (rhsField != null) {
             if (!s.hasField(rhsField))
                 return false;
@@ -70,7 +63,7 @@ public class DBTerm {
                 return compareStrings(lhsStr, rhsStr);
             }
         }
-        // If field-to-constant comparison
+        
         else {
             Integer lhsInt = s.getInt(lhsField);
             if (lhsInt != null && rhsConst.asInt() != null) {

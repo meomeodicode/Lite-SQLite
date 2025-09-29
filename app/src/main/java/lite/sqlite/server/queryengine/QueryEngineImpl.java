@@ -1,5 +1,6 @@
 package lite.sqlite.server.queryengine;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -8,7 +9,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.server.Parser;
-import lite.sqlite.server.model.TableDefinition;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lite.sqlite.server.model.domain.clause.DBTerm;
@@ -18,13 +18,25 @@ import lite.sqlite.server.model.domain.commands.QueryData;
 import lite.sqlite.server.parser.ParserImpl;
 import lite.sqlite.server.scan.RORecordScan;
 import lite.sqlite.server.scan.RORecordScanImpl;
+import lite.sqlite.server.storage.BasicFileManager;
+import lite.sqlite.server.storage.buffer.BufferPool;
+import lite.sqlite.server.storage.table.RecordId;
+import lite.sqlite.server.storage.table.Table;
+import lite.sqlite.server.storage.record.Record;
+import lite.sqlite.server.storage.record.Schema;;
+
 
 public class QueryEngineImpl implements QueryEngine {
     
-    private Map<String,TableDefinition> schema = new ConcurrentHashMap<>();
-    private Map<String, List<List<Object>>> tableData = new ConcurrentHashMap<>();
+    private final Map<String,Table> tables = new ConcurrentHashMap<>();
+    private final BufferPool bufferPool;
+    private final BasicFileManager fileManager;
 
-    public QueryEngineImpl() {}
+    public QueryEngineImpl() {
+        File dbDirectory = new File("database");
+        this.fileManager = new BasicFileManager(dbDirectory);
+        this.bufferPool = new BufferPool(50, fileManager);
+    }
 
     @Override
     public TableDto doQuery(String sql) {
@@ -64,53 +76,62 @@ public class QueryEngineImpl implements QueryEngine {
     {
         String tableName = queryData.getTable();
         
-        if (!schema.containsKey(tableName)) {
+        if (!tables.containsKey(tableName)) {
             return TableDto.forError("Table" + tableName + "doesn't exist");
         }
 
-        TableDefinition tableDefinition = schema.get(tableName);
-
+        Table table = tables.get(tableName);
+        Schema selectedSchema = table.getSchema();
         List<String> selectedColumns = queryData.getFields();
-
-        if  (selectedColumns.isEmpty())
-        {
+        
+        if  (selectedColumns.isEmpty()) {
             return TableDto.forError("Table" + tableName + "has no fields");
         }
-
-        List<Integer> columnIndexes = getColumnIndexes(tableDefinition, selectedColumns);
-        List<List<Object>> rows = tableData.get(tableName);
-        List<List<Object>> filteredRows = applyWhereFilter(rows, tableDefinition, queryData.getPredicate());
-        
-        List<String> resultColumns = new ArrayList<>();
-        List<List<String>> resultRows = new ArrayList<>();
-
-        if (selectedColumns.size() == 1 && "*".equals(selectedColumns.get(0))) {
-            resultColumns = new ArrayList<>(tableDefinition.getFieldNames());
-        } else {
-            resultColumns = new ArrayList<>(selectedColumns);
+        else if (selectedColumns.get(0).equals("*")) {
+            selectedColumns = selectedSchema.getColumnNames();
         }
 
-        for (List<Object> row : filteredRows) {
-            List<String> resultRow = new ArrayList<>();
-            for (int colIndex : columnIndexes) {
-                Object value = (colIndex < row.size()) ? row.get(colIndex) : null;
-                resultRow.add(value != null ? value.toString() : "NULL");
+        try {
+            List<Record> records = new ArrayList<>();
+            for (Record record: table) {
+                records.add(record);
             }
-            resultRows.add(resultRow);
+            List<Record> filteredRows = applyWhereFilter(selectedSchema, records, queryData.getPredicate());        
+            List<Integer> columnIndexes = new ArrayList<>();
+            
+            for (String columnName: selectedColumns) {
+                int columnIdx = selectedSchema.getColumnIndex(columnName);
+                columnIndexes.add(columnIdx);
+            }
+
+            List<List<String>> resultRows = new ArrayList<>();
+            for (Record record : filteredRows) {
+                List<String> resultRow = new ArrayList<>();
+                Object[] values = record.getValues();
+                
+                for (int colIndex : columnIndexes) {
+                    Object value = (colIndex < values.length) ? values[colIndex] : null;
+                    resultRow.add(value != null ? value.toString() : "NULL");
+                }
+                resultRows.add(resultRow);
         }
         
-        return new TableDto(resultColumns, resultRows);
-
+        return new TableDto(selectedColumns, resultRows);
+        
+    } catch (Exception e) {
+        return TableDto.forError("Error executing SELECT: " + e.getMessage());
+    }
     }
     
-    private List<List<Object>> applyWhereFilter(List<List<Object>> rows, TableDefinition tableDefinition, DBPredicate predicate) {
+    private List<Record> applyWhereFilter(Schema selectedSchema, List<Record> rows, DBPredicate predicate) {
+
         if (predicate == null || predicate.getTerms() == null || predicate.getTerms().isEmpty()) {
             return rows;
         }   
-        List<List<Object>> filteredRows = new ArrayList<>();
+        List<Record> filteredRows = new ArrayList<>();
 
-        for (List<Object> row: rows) {
-            RORecordScan recordScan = new RORecordScanImpl(row, tableDefinition);
+        for (Record row: rows) {
+            RORecordScan recordScan = new RORecordScanImpl(row, selectedSchema);
             boolean matchesAllTerms = true;
 
             for (DBTerm term : predicate.getTerms()) {
@@ -127,68 +148,41 @@ public class QueryEngineImpl implements QueryEngine {
         return filteredRows;
     }
 
-    private List<Integer> getColumnIndexes(TableDefinition tableDefinition, List<String> selectedColumns)
-    {
-        List<Integer> indexes = new ArrayList<>();
-        List<String> fieldNames = tableDefinition.getFieldNames();
-
-        if (selectedColumns.size() == 1 && "*".equals(selectedColumns.get(0))) {
-            for (int i = 0; i < fieldNames.size(); i++) {
-                indexes.add(i);
-            }
-        } else {
-            for (String columnName : selectedColumns) {
-                int index = fieldNames.indexOf(columnName);
-                indexes.add(index); 
-            }
-        }
-        
-        return indexes;
-    }
-
     private TableDto executeCreateTable(CreateTableData createData) {
 
         String tableName = createData.getTableName();
-        System.out.println("DEBUG: CREATE TABLE - Table name: " + tableName);
-        System.out.println("DEBUG: CREATE TABLE - Schema: " + createData.getSchema());
-        System.out.println("DEBUG: CREATE TABLE - Schema fields: " + createData.getSchema().getFieldNames());
-        
-        if (schema.containsKey(tableName)) {
+
+        if (tables.containsKey(tableName)) {
             return TableDto.forError("Table '" + tableName + "' already exists");
         }
-        
-        schema.put(tableName, createData.getSchema());
-        tableData.put(tableName, new ArrayList<>());
-        
-        System.out.println("DEBUG: CREATE TABLE - Stored schema: " + schema.get(tableName).getFieldNames());
-        
+
+        Schema newSchema = createData.getSchemaPresentation().convertToSchema();
+        Table newTable = new Table(newSchema, bufferPool, tableName);
+        tables.put(tableName, newTable);        
         return TableDto.forUpdateResult(0);
     }
 
+
     private TableDto executeInsert(InsertData insertData) {
         System.out.println("DEBUG: executeInsert called");
+        
         String tableName = insertData.getTableName();
+        Table table = tables.get(tableName);
+
         System.out.println("DEBUG: Table name: " + tableName);
 
-        if (!schema.containsKey(tableName)) {
+        if (!tables.containsKey(tableName)) {
             System.out.println("DEBUG: Table not found in schema");
-            System.out.println("DEBUG: Available tables: " + schema.keySet());
+            System.out.println("DEBUG: Available tables: " + tables.keySet());
             return TableDto.forError("Table '" + tableName + "' does not exist");
         }
         
-        TableDefinition tableDefinition = schema.get(tableName);
-        List<String> schemaFields = tableDefinition.getFieldNames();
+        Schema schema = table.getSchema();
+        List<String> schemaFields = schema.getColumnNames();
         System.out.println("DEBUG: Schema fields: " + schemaFields);
-        
-        List<Object> newRow = new ArrayList<>(Collections.nCopies(schemaFields.size(), null));
         
         List<String> insertFields = insertData.getFields();
         List<DBConstant> insertValues = insertData.getValues();
-        
-        System.out.println("DEBUG: Insert fields: " + insertFields);
-        System.out.println("DEBUG: Insert values: " + insertValues);
-        System.out.println("DEBUG: Fields size: " + insertFields.size());
-        System.out.println("DEBUG: Values size: " + insertValues.size());
         
         if (insertFields.isEmpty()) {
             System.out.println("DEBUG: ERROR - Insert fields is empty!");
@@ -200,28 +194,30 @@ public class QueryEngineImpl implements QueryEngine {
             return TableDto.forError("No values specified for INSERT");
         }
         
-        for (int i = 0; i < insertFields.size(); i++) {
-            String fieldName = insertFields.get(i);
-            System.out.println("DEBUG: Processing field: " + fieldName);
+        try {
+            Object[] recordData = new Object[schemaFields.size()];
+            
+            for (int i = 0; i < insertFields.size(); i++) {
+                String fieldName = insertFields.get(i);
+                int schemaIndex = schemaFields.indexOf(fieldName);
 
-            int schemaIndex = schemaFields.indexOf(fieldName);
-            System.out.println("DEBUG: Field index in schema: " + schemaIndex);
-
-            if (schemaIndex == -1) {
-                return TableDto.forError("Column '" + fieldName + "' does not exist");
+                if (schemaIndex == -1) {
+                    return TableDto.forError("Column '" + fieldName + "' does not exist");
+                }
+                
+                DBConstant value = insertValues.get(i);
+                Object convertedValue = convertValue(value);
+                recordData[schemaIndex] = convertedValue;
             }
             
-            DBConstant value = insertValues.get(i);
-            Object convertedValue = convertValue(value);
-            System.out.println("DEBUG: Converting value: " + value + " -> " + convertedValue);
-            newRow.set(schemaIndex, convertedValue);
+            Record record = new Record(recordData);
+            RecordId recordId = table.insertRecord(record);
+            System.out.println("DEBUG: Record inserted with ID: " + recordId);
+            return TableDto.forUpdateResult(1);
         }
-        
-        System.out.println("DEBUG: New row: " + newRow);
-        tableData.get(tableName).add(newRow);
-        System.out.println("DEBUG: Total rows in table: " + tableData.get(tableName).size());
-        
-        return TableDto.forUpdateResult(1);
+        catch (Exception e) {
+            return TableDto.forError("Error inserting record");
+        }
     }
 
     private Object convertValue(DBConstant constant) {

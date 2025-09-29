@@ -1,11 +1,10 @@
 package lite.sqlite.server.parser;
 import java.util.ArrayList;
 import java.util.List;
-
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementBaseVisitor;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
 
-import lite.sqlite.server.model.TableDefinition;
+import lite.sqlite.server.model.SchemaPresentation;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBExpression;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
@@ -16,6 +15,7 @@ import lite.sqlite.server.model.domain.commands.DeleteData;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
 import lite.sqlite.server.model.domain.commands.UpdateData;
+import lite.sqlite.server.storage.record.Schema;
 
 public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
@@ -41,25 +41,20 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     private String indexName;
     private String indexFieldName;
 
-    private TableDefinition schema;
+    private SchemaPresentation tableDTO;
 
     public MySqlStatementVisitor(MySQLStatementParser parser) {
         this.parser = parser;
 
         this.tableName = "";
         this.pred = new DBPredicate();
-
         this.selectedFields = new ArrayList<>();
-
         this.indexName = "";
         this.indexFieldName = "";
-
         this.insertFields = new ArrayList<>();
         this.insertedVals = new ArrayList<>();
-
         this.updatedFieldName = "";
-
-        this.schema = new TableDefinition();
+        this.tableDTO = new SchemaPresentation();
     }
 
     // Command Type Visitors
@@ -231,7 +226,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             
             if (fieldName != null && fieldType != null) {
                 System.out.println("DEBUG: Parsed field: " + fieldName + " type: " + fieldType);
-                this.schema.addField(fieldName, fieldType);
+                this.tableDTO.addField(fieldName, fieldType);
             } else {
                 System.out.println("DEBUG: Could not parse: " + text);
             }
@@ -271,8 +266,8 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return indexFieldName;
     }
 
-    public TableDefinition getSchema() {
-        return schema;
+    public SchemaPresentation getTableDTO() {
+        return tableDTO;
     }
 
     public String getUpdatedFieldName() {
@@ -290,11 +285,11 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             case INSERT:
                 return new InsertData(insertFields, insertedVals, tableName);
             case MODIFY:
-                return new UpdateData(java.util.List.of(updatedFieldName), pred, tableName);
+                return new UpdateData(List.of(updatedFieldName), pred, tableName);
             case DELETE:
-                return new DeleteData(selectedFields, java.util.List.of(pred), tableName);
+                return new DeleteData(selectedFields, List.of(pred), tableName);
             case CREATE_TABLE:
-                return new CreateTableData(tableName, schema);
+                return new CreateTableData(tableName, tableDTO);
             case CREATE_INDEX:
                 return new CreateIndexData(indexName, tableName, indexFieldName);
             default:

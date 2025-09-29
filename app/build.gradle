@@ -16,8 +16,8 @@ repositories {
 }
 
 dependencies {
-    // Use JUnit 4 for testing.
-   testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    // Use JUnit 5 for testing
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
     testImplementation 'org.mockito:mockito-core:4.0.0'
     implementation libs.guava
@@ -33,17 +33,13 @@ test {
     testLogging {
         events "passed", "skipped", "failed"
         exceptionFormat "full"
-        showStandardStreams = false
+        showStandardStreams = true  
     }
     
-    // Set test JVM options
     jvmArgs '-Xmx1g'
-    
-    // Enable parallel test execution (optional)
-    maxParallelForks = Runtime.runtime.availableProcessors()
+    maxParallelForks = 1  
 }
 
-// Apply a specific Java toolchain to ease working on different environments.
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -51,13 +47,7 @@ java {
 }
 
 application {
-    // Define the main class for the application.
     mainClass = 'lite.sqlite.App'
-}
-
-tasks.named('test') {
-    // Use JUnit 4 for unit tests.
-    useJUnit()
 }
 
 task testRecordPage(type: Test) {
@@ -67,5 +57,16 @@ task testRecordPage(type: Test) {
     }
     testLogging {
         events "passed", "skipped", "failed"
+    }
+}
+
+task testQueryEngine(type: Test) {
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching "lite.sqlite.server.queryengine.QueryEngineTest"
+    }
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
     }
 }

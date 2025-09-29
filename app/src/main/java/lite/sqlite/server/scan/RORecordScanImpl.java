@@ -1,26 +1,24 @@
 package lite.sqlite.server.scan;
 
-import java.util.List;
-
-import lite.sqlite.server.model.TableDefinition;
+import lite.sqlite.server.storage.record.Schema;
+import lite.sqlite.server.storage.record.Record;
 
 public class RORecordScanImpl implements RORecordScan {
     
-    private final List<Object> currentRow;
-    private final TableDefinition tableSchema;
+    private Record currentRow;
+    private Schema tableSchema;
     
-    public RORecordScanImpl(List<Object> row, TableDefinition schema) {
+    public RORecordScanImpl(Record row, Schema schema) {
         this.currentRow = row;
         this.tableSchema = schema;
     }
 
     @Override
-    public Integer getInt(String fldname) {
-        Object value = getFieldValue(fldname);
+    public Integer getInt(String fieldName) {
+        Object value = getFieldValue(fieldName);
         if (value == null) {
             return null;
         }
-        
         try {
             if (value instanceof Integer) {
                 return (Integer) value;
@@ -30,33 +28,27 @@ public class RORecordScanImpl implements RORecordScan {
                 return Integer.parseInt(value.toString());
             }
         } catch (NumberFormatException e) {
-            return null; // Not a valid integer
+            return null;
         }
     }
     
     @Override
-    public String getString(String fldname) {
-        Object value = getFieldValue(fldname);
+    public String getString(String fieldName) {
+        Object value = getFieldValue(fieldName);
         return value != null ? value.toString() : null;
     }
     
     @Override
-    public boolean hasField(String fldname) {
-        return tableSchema.getFieldNames().contains(fldname);
+    public boolean hasField(String fieldName) {
+        return tableSchema.getColumnNames().contains(fieldName);
     }
     
-    /**
-     * Helper method to get the raw field value by name.
-     */
-    private Object getFieldValue(String fldname) {
-        List<String> fieldNames = tableSchema.getFieldNames();
-        int fieldIndex = fieldNames.indexOf(fldname);
-        
+    private Object getFieldValue(String fieldName) {
+        int fieldIndex = tableSchema.getColumnIndex(fieldName);
         if (fieldIndex == -1 || fieldIndex >= currentRow.size()) {
             return null;
         }
-        
-        return currentRow.get(fieldIndex);
+        return currentRow.getValue(fieldIndex);
     }
     
 }

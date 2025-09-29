@@ -4,7 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Schema {
-        private List<Column> columns;
+    
+    private List<Column> columns;
     
     public Schema() {
         this.columns = new ArrayList<>();
