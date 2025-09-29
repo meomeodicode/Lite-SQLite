@@ -2,6 +2,7 @@ package lite.sqlite.server.queryengine;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +23,7 @@ import lite.sqlite.server.storage.BasicFileManager;
 import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.table.RecordId;
 import lite.sqlite.server.storage.table.Table;
+import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
 import lite.sqlite.server.storage.record.Schema;;
 
@@ -149,74 +151,116 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     private TableDto executeCreateTable(CreateTableData createData) {
-
         String tableName = createData.getTableName();
-
+        
         if (tables.containsKey(tableName)) {
             return TableDto.forError("Table '" + tableName + "' already exists");
         }
-
-        Schema newSchema = createData.getSchemaPresentation().convertToSchema();
-        Table newTable = new Table(newSchema, bufferPool, tableName);
-        tables.put(tableName, newTable);        
+        
+        try {
+            System.out.println("DEBUG: Creating table " + tableName);
+            // Log the schema presentation
+            System.out.println("DEBUG: Schema fields: " + 
+                createData.getSchemaPresentation().getFieldNames());
+            System.out.println("DEBUG: Schema types: " + 
+                createData.getSchemaPresentation().getFieldTypes());
+            
+            Schema newSchema = createData.getSchemaPresentation().convertToSchema();
+            System.out.println("DEBUG: Converted to storage schema successfully");
+            
+            // Print detailed info about the schema
+            System.out.println("DEBUG: Storage schema columns: " + newSchema.getColumnNames());
+            
+            Table newTable = new Table(newSchema, bufferPool, tableName);
+            System.out.println("DEBUG: Created Table object successfully");
+        
+        tables.put(tableName, newTable);
+        System.out.println("DEBUG: Table registered in engine");
+        
         return TableDto.forUpdateResult(0);
+    } catch (Exception e) {
+        // Print the full stack trace for better debugging
+        e.printStackTrace();
+        return TableDto.forError("Error creating table: " + e.getMessage());
     }
-
+}
 
     private TableDto executeInsert(InsertData insertData) {
-        System.out.println("DEBUG: executeInsert called");
-        
         String tableName = insertData.getTableName();
-        Table table = tables.get(tableName);
-
-        System.out.println("DEBUG: Table name: " + tableName);
-
+        
         if (!tables.containsKey(tableName)) {
-            System.out.println("DEBUG: Table not found in schema");
-            System.out.println("DEBUG: Available tables: " + tables.keySet());
             return TableDto.forError("Table '" + tableName + "' does not exist");
         }
         
+        Table table = tables.get(tableName);
         Schema schema = table.getSchema();
         List<String> schemaFields = schema.getColumnNames();
-        System.out.println("DEBUG: Schema fields: " + schemaFields);
-        
         List<String> insertFields = insertData.getFields();
         List<DBConstant> insertValues = insertData.getValues();
         
-        if (insertFields.isEmpty()) {
-            System.out.println("DEBUG: ERROR - Insert fields is empty!");
-            return TableDto.forError("No fields specified for INSERT");
-        }
-        
-        if (insertValues.isEmpty()) {
-            System.out.println("DEBUG: ERROR - Insert values is empty!");
-            return TableDto.forError("No values specified for INSERT");
-        }
-        
         try {
+            System.out.println("DEBUG: Insert - Creating record data array");
             Object[] recordData = new Object[schemaFields.size()];
             
             for (int i = 0; i < insertFields.size(); i++) {
                 String fieldName = insertFields.get(i);
                 int schemaIndex = schemaFields.indexOf(fieldName);
-
+                
                 if (schemaIndex == -1) {
                     return TableDto.forError("Column '" + fieldName + "' does not exist");
                 }
                 
                 DBConstant value = insertValues.get(i);
-                Object convertedValue = convertValue(value);
+                Object convertedValue = convertValueToSchemaType(value, schema.getColumn(schemaIndex).getType());
+
+                System.out.println("DEBUG: Setting " + fieldName + "=" + convertedValue + 
+                    " at index " + schemaIndex);
                 recordData[schemaIndex] = convertedValue;
             }
             
             Record record = new Record(recordData);
+            System.out.println("DEBUG: Created record: " + Arrays.toString(recordData));
+            
             RecordId recordId = table.insertRecord(record);
             System.out.println("DEBUG: Record inserted with ID: " + recordId);
+            
+            // Make sure changes are persisted
+            bufferPool.flushAll();
+            System.out.println("DEBUG: Flushed buffer pool");
+            
             return TableDto.forUpdateResult(1);
+        } catch (Exception e) {
+            e.printStackTrace(); // Print stack trace for better debugging
+            return TableDto.forError("Error inserting record: " + e.getMessage());
         }
-        catch (Exception e) {
-            return TableDto.forError("Error inserting record");
+    }
+
+    private Object convertValueToSchemaType(DBConstant constant, DataType targetType) {
+        if (constant == null) {
+            return null;
+        }
+
+        switch (targetType) {
+            case INTEGER:
+                // If the constant is already an int, use it. Otherwise, parse it from a string.
+                if (constant.asInt() != null) {
+                    return constant.asInt();
+                }
+                try {
+                    // This handles cases where the parser treats numbers as strings
+                    return Integer.parseInt(constant.asString());
+                } catch (NumberFormatException e) {
+                    // Handle cases where a non-numeric string is inserted into an INT column
+                    throw new IllegalArgumentException("Invalid integer value: " + constant.asString());
+                }
+            
+            case VARCHAR:
+                // Return the value as a string
+                return constant.asString();
+            
+            default:
+                // Default to string representation if type is unknown
+                return constant.toString();
         }
     }
 
