@@ -209,8 +209,10 @@ public class RecordPage {
             
             if (recordOffset != -1) {
                 Object[] record = getRecord(slot);
-                if (record != null)
+                if (record != null) {
                     result.add(new RecordWithSlot(record, slot));
+            
+                }
             }
         }
         
@@ -291,12 +293,12 @@ public class RecordPage {
         buffer.rewind();
         buffer.get(result);
         
-        // ✅ Added debug output
         System.out.println("DEBUG: Serialized record size: " + result.length);
         return result;
     }
 
     private Object[] deserializeRecord(byte[] data) {
+
         ByteBuffer buffer = ByteBuffer.wrap(data);
         Object[] record = new Object[schema.getColumnCount()];
         

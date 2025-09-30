@@ -44,37 +44,69 @@ public class DBTerm {
         this.rhsField = rhs;
     }
     
-    public boolean isSatisfied(RORecordScan s) {
-        if (!s.hasField(lhsField))
+        public boolean isSatisfied(RORecordScan s) {
+        if (!s.hasField(lhsField)) {
             return false;
-        
+        }
+
         if (rhsField != null) {
-            if (!s.hasField(rhsField))
-                return false;
-            
-            Integer lhsInt = s.getInt(lhsField);
-            Integer rhsInt = s.getInt(rhsField);
-            
-            if (lhsInt != null && rhsInt != null) {
-                return compareInts(lhsInt, rhsInt);
-            } else {
-                String lhsStr = s.getString(lhsField);
-                String rhsStr = s.getString(rhsField);
-                return compareStrings(lhsStr, rhsStr);
-            }
+            return false;
         }
         
-        else {
-            Integer lhsInt = s.getInt(lhsField);
-            if (lhsInt != null && rhsConst.asInt() != null) {
-                return compareInts(lhsInt, rhsConst.asInt());
+
+        Object constValue = rhsConst.asJavaVal();
+        
+
+        boolean isIntegerComparison = (constValue instanceof Integer);
+        
+        try {
+            // Perform type-specific comparison
+            if (isIntegerComparison) {
+                // Get the field as an integer
+                Integer fieldValue = s.getInt(lhsField);
+                if (fieldValue == null) {
+                    System.err.println("DEBUG: Field '" + lhsField + "' is not an integer or is NULL.");
+                    return false;
+                }
+                
+                // Compare integers
+                Integer constInt = (Integer)constValue;
+                switch (operator) {
+                    case 0: return fieldValue.equals(constInt);      // =
+                    case 1: return fieldValue.compareTo(constInt) > 0;  // >
+                    case 2: return fieldValue.compareTo(constInt) < 0;  // <
+                    // Add other operators as needed
+                    default: return false;
+                }
             } else {
-                String lhsStr = s.getString(lhsField);
-                return compareStrings(lhsStr, rhsConst.asString());
+                // Assume string comparison
+                String fieldValue = s.getString(lhsField);
+                if (fieldValue == null) {
+                    System.err.println("DEBUG: Field '" + lhsField + "' is NULL or cannot be retrieved as a string.");
+                    return false;
+                }
+                
+                // Convert constant to string for comparison
+                String constStr = constValue.toString();
+                if (constValue instanceof String) {
+                    // If it's already a string, use it directly (don't add extra quotes from toString)
+                    constStr = (String)constValue;
+                }
+                
+                switch (operator) {
+                    case 0: return fieldValue.equals(constStr);      // =
+                    case 1: return fieldValue.compareTo(constStr) > 0;  // >
+                    case 2: return fieldValue.compareTo(constStr) < 0;  // <
+                    // Add other operators as needed
+                    default: return false;
+                }
             }
+        } catch (Exception e) {
+            System.err.println("DEBUG: Error in comparison: " + e.getMessage());
+            e.printStackTrace();
+            return false;
         }
     }
-    
     /**
      * If this term equates a field to a constant, return that constant.
      * Otherwise, return null.
@@ -109,57 +141,40 @@ public class DBTerm {
             default: return false;
         }
     }
-    
-    /**
-     * Returns the left side field name.
-     * 
-     * @return the left side field name
-     */
+
     public String getLhsField() {
         return lhsField;
     }
-    
-    /**
-     * Returns the right side field name if this term compares two fields.
-     * 
-     * @return the right side field name, or null if this term compares a field to a constant
-     */
+
     public String getRhsField() {
         return rhsField;
     }
-    
-    /**
-     * Returns the right side constant if this term compares a field to a constant.
-     * 
-     * @return the right side constant, or null if this term compares two fields
-     */
+
     public DBConstant getRhsConstant() {
         return rhsConst;
     }
     
-    /**
-     * Returns the operator for this term.
-     * 
-     * @return the operator code (EQUALS, GREATER_THAN, LESS_THAN, or LIKE)
-     */
     public int getOperator() {
         return operator;
     }
     
     @Override
     public String toString() {
-        String op;
+        String opStr;
         switch (operator) {
-            case EQUALS: op = "="; break;
-            case GREATER_THAN: op = ">"; break;
-            case LESS_THAN: op = "<"; break;
-            case LIKE: op = "LIKE"; break;
-            default: op = "?"; break;
+            case 0: opStr = "="; break;
+            case 1: opStr = ">"; break;
+            case 2: opStr = "<"; break;
+            default: opStr = "op" + operator; break;
         }
         
-        if (rhsField != null)
-            return lhsField + " " + op + " " + rhsField;
-        else
-            return lhsField + " " + op + " " + rhsConst;
+        String rightSide;
+        if (rhsField != null) {
+            rightSide = rhsField;
+        } else {
+            rightSide = (rhsConst != null) ? rhsConst.toString() : "null";
+        }
+        
+        return lhsField + " " + opStr + " " + rightSide;
     }
 }

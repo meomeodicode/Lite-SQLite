@@ -1,35 +1,77 @@
 package lite.sqlite.server.model.domain.clause;
 
 import java.io.Serializable;
+import java.util.Objects;
 
 public class DBConstant implements Comparable<DBConstant>, Serializable {
-    private static final long serialVersionUID = 1L;
-    private Integer ival;
-    private String sval;
 
-    public DBConstant(Integer val) {
-        this.ival = val;
-    }
+    private Object val;
 
-    public DBConstant(String str) {
-        this.sval = str;
+    public DBConstant(Object val) {
+        this.val = val;
     }
 
     public Integer asInt() {
-        return ival;
+        return (val instanceof Integer) ? (Integer) val : null;
     }
 
     public String asString() {
-        return sval;
+        // Return null if val is not a string, to be consistent with asInt()
+        return (val instanceof String) ? (String) val : null;
     }
 
+    @Override
     public boolean equals(Object obj) {
-        DBConstant tmpObj = (DBConstant) obj;
-        return (ival != null) ? ival.equals(tmpObj.ival) : sval.equals(tmpObj.sval);
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+        DBConstant that = (DBConstant) obj;
+        // Use Objects.equals for safe comparison of potentially null values.
+        return Objects.equals(val, that.val);
     }
 
-    public int compareTo(DBConstant tmpObj) {
-        return (ival != null) ? ival.compareTo(tmpObj.ival) : sval.compareTo(tmpObj.sval);
+@Override
+    public int compareTo(DBConstant other) {
+        if (other == null || other.val == null) {
+            return (this.val == null) ? 0 : 1; // An object is greater than null
+        }
+        if (this.val == null) {
+            return -1; // Null is less than an object
+        }
+
+        // Ensure both values are of a comparable type
+        if (!(this.val instanceof Comparable) || !(other.val instanceof Comparable)) {
+            throw new ClassCastException("Cannot compare non-comparable types.");
+        }
+
+        // Check for incompatible types (e.g., Integer vs. String)
+        if (this.val.getClass() != other.val.getClass()) {
+            throw new ClassCastException("Cannot compare " + this.val.getClass().getSimpleName() +
+                                         " with " + other.val.getClass().getSimpleName());
+        }
+
+        @SuppressWarnings("unchecked")
+        Comparable<Object> thisComparable = (Comparable<Object>) this.val;
+        
+        return thisComparable.compareTo(other.val);
+    }
+
+    public Object asJavaVal() {
+        return val;
+    }
+
+    @Override
+    public String toString() {
+        if (val instanceof String) {
+            return "'" + val + "'"; // Enclose strings in single quotes
+        }
+        if (val == null) {
+            return "NULL";
+        }
+        return val.toString();
     }
     
+    @Override
+    public int hashCode() {
+        return Objects.hash(val);
+    }
 }

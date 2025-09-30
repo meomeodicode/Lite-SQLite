@@ -3,7 +3,6 @@ package lite.sqlite.server.queryengine;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -85,12 +84,9 @@ public class QueryEngineImpl implements QueryEngine {
         Table table = tables.get(tableName);
         Schema selectedSchema = table.getSchema();
         List<String> selectedColumns = queryData.getFields();
-        
+
         if  (selectedColumns.isEmpty()) {
             return TableDto.forError("Table" + tableName + "has no fields");
-        }
-        else if (selectedColumns.get(0).equals("*")) {
-            selectedColumns = selectedSchema.getColumnNames();
         }
 
         try {
@@ -130,8 +126,8 @@ public class QueryEngineImpl implements QueryEngine {
         if (predicate == null || predicate.getTerms() == null || predicate.getTerms().isEmpty()) {
             return rows;
         }   
-        List<Record> filteredRows = new ArrayList<>();
 
+        List<Record> filteredRows = new ArrayList<>();
         for (Record row: rows) {
             RORecordScan recordScan = new RORecordScanImpl(row, selectedSchema);
             boolean matchesAllTerms = true;
@@ -159,7 +155,6 @@ public class QueryEngineImpl implements QueryEngine {
         
         try {
             System.out.println("DEBUG: Creating table " + tableName);
-            // Log the schema presentation
             System.out.println("DEBUG: Schema fields: " + 
                 createData.getSchemaPresentation().getFieldNames());
             System.out.println("DEBUG: Schema types: " + 
@@ -224,7 +219,6 @@ public class QueryEngineImpl implements QueryEngine {
             RecordId recordId = table.insertRecord(record);
             System.out.println("DEBUG: Record inserted with ID: " + recordId);
             
-            // Make sure changes are persisted
             bufferPool.flushAll();
             System.out.println("DEBUG: Flushed buffer pool");
             
@@ -242,34 +236,20 @@ public class QueryEngineImpl implements QueryEngine {
 
         switch (targetType) {
             case INTEGER:
-                // If the constant is already an int, use it. Otherwise, parse it from a string.
                 if (constant.asInt() != null) {
                     return constant.asInt();
                 }
                 try {
-                    // This handles cases where the parser treats numbers as strings
                     return Integer.parseInt(constant.asString());
                 } catch (NumberFormatException e) {
-                    // Handle cases where a non-numeric string is inserted into an INT column
                     throw new IllegalArgumentException("Invalid integer value: " + constant.asString());
                 }
             
             case VARCHAR:
-                // Return the value as a string
                 return constant.asString();
             
             default:
-                // Default to string representation if type is unknown
                 return constant.toString();
         }
     }
-
-    private Object convertValue(DBConstant constant) {
-        if (constant == null) return null;
-        if (constant.asInt() != null) return constant.asInt();
-        if (constant.asString() != null) return constant.asString();
-        return constant.toString();
-    }
-
-
 }

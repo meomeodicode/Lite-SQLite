@@ -1,6 +1,8 @@
 package lite.sqlite.server.storage.table;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -167,33 +169,63 @@ public class Table implements Iterable<Record> {
      * Inner class for iterating over the records in the table.
      */
     private class TableIterator implements Iterator<Record> {
-        private final RecordPage recordPage;
-        private final Block block;
-        private final List<RecordWithSlot> records;
-        private int currentIndex = 0;
+    private List<RecordWithSlot> records;
+    private int currentIndex = 0;
+    
+    public TableIterator() throws IOException {
+        records = getAllRecordsFromAllBlocks();
+    }
+    
+    private List<RecordWithSlot> getAllRecordsFromAllBlocks() throws IOException {
+        List<RecordWithSlot> allRecords = new ArrayList<>();
+        String filename = getFileName();
         
-        public TableIterator() throws IOException {
-            String filename = getFileName();
-            this.block = new Block(filename, 0); 
-            Page page = bufferPool.pinBlock(block);
-            this.recordPage = new RecordPage(page, getSchema(), block, bufferPool);
-            this.records = recordPage.getAllRecords();
-        }
+        int blockId = 0;
+        boolean hasMoreBlocks = true;
         
-        @Override
-        public boolean hasNext() {
-            return currentIndex < records.size();
-        }
-        
-        @Override
-        public Record next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
+        while (hasMoreBlocks) {
+            try {
+                Block block = new Block(filename, blockId);
+                Page page = bufferPool.pinBlock(block);
+                
+                try {
+                    RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
+                    List<RecordWithSlot> blockRecords = recordPage.getAllRecords();
+                    
+                    if (blockRecords != null && !blockRecords.isEmpty()) {
+                        allRecords.addAll(blockRecords);
+                        blockId++; // Try the next block
+                    } else {
+                        // No records in this block - might be the end
+                        hasMoreBlocks = (blockId == 0); // Only continue if this was block 0
+                    }
+                } finally {
+                    bufferPool.unpinBlock(block);
+                }
+            } catch (Exception e) {
+                // If we can't access a block, we've reached the end
+                System.out.println("DEBUG: Reached end of blocks at " + blockId);
+                hasMoreBlocks = false;
             }
-            
-            RecordWithSlot recordWithSlot = records.get(currentIndex++);
-            return new Record(recordWithSlot.getRecord());
         }
         
+        return allRecords;
+    }
+    
+    @Override
+    public boolean hasNext() {
+        return currentIndex < records.size();
+    }
+    
+    @Override
+    public Record next() {
+        if (!hasNext()) {
+            throw new NoSuchElementException();
+        }
+        
+        RecordWithSlot recordWithSlot = records.get(currentIndex++);
+        Object[] values = recordWithSlot.getRecord();
+        return new Record(values);
+    }
     }
 }

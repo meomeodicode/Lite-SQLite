@@ -8,6 +8,7 @@ import lite.sqlite.server.model.SchemaPresentation;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBExpression;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
+import lite.sqlite.server.model.domain.clause.DBTerm;
 import lite.sqlite.server.model.domain.commands.CommandType;
 import lite.sqlite.server.model.domain.commands.CreateIndexData;
 import lite.sqlite.server.model.domain.commands.CreateTableData;
@@ -66,8 +67,8 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     @Override
     public Object visitCreateTable(MySQLStatementParser.CreateTableContext ctx) {
-        System.out.println("DEBUG: visitCreateTable called");
-        System.out.println("DEBUG: Context text: " + ctx.getText());
+        // System.out.println("DEBUG: visitCreateTable called");
+        // System.out.println("DEBUG: Context text: " + ctx.getText());
         
         this.commandType = CommandType.CREATE_TABLE;
         
@@ -122,37 +123,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     public Object visitSelect(MySQLStatementParser.SelectContext ctx) {
         commandType = CommandType.QUERY;
         selectedFields.clear();
-        
-        String selectText = ctx.getText();
-        System.out.println("DEBUG: Parsing SELECT: " + selectText);
-        
-        try {
-        int selectIndex = selectText.indexOf("SELECT");
-        int fromIndex = selectText.indexOf("FROM");
-        
-        if (selectIndex != -1 && fromIndex != -1 && selectIndex < fromIndex) {
-            String fieldsPart = selectText.substring(selectIndex + 6, fromIndex); 
-            System.out.println("DEBUG: Raw fields part: '" + fieldsPart + "'");
-            
-            if (fieldsPart.contains("*")) {
-                selectedFields.add("*");
-                System.out.println("DEBUG: Added SELECT *");
-            } else {
-                String[] fields = fieldsPart.split("AND");
-                for (String field : fields) {
-                    String cleanField = field.trim();
-                    if (!cleanField.isEmpty()) {
-                        selectedFields.add(cleanField);
-                        System.out.println("DEBUG: Added select field: " + cleanField);
-                    }
-                }
-            }
-        }
-    } catch (Exception e) {
-        System.out.println("DEBUG: Error extracting SELECT fields: " + e.getMessage());
-        selectedFields.add("*"); 
-    }
-    return super.visitSelect(ctx);
+        return super.visitSelect(ctx);
     }
 
     @Override
@@ -164,7 +135,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitProjection(MySQLStatementParser.ProjectionContext ctx) {        
         if (ctx.expr() != null) {
-            System.out.println(ctx.expr());
+            // System.out.println(ctx.expr());
             this.selectedFields.add(ctx.expr().getText());
         }
         return super.visitProjection(ctx);
@@ -193,9 +164,66 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     @Override
     public Object visitWhereClause(MySQLStatementParser.WhereClauseContext ctx) {
-        if (ctx.expr() != null) {
-            this.pred = new DBPredicate(ctx.expr().getText());
+        String clause = ctx.getText();
+        System.out.println("DEBUG: Parsing WHERE clause: " + clause);
+        
+        String expression = clause;
+        if (expression.toUpperCase().startsWith("WHERE")) {
+            expression = expression.substring(5).trim();
         }
+        
+        String lhsField = null;
+        int operatorCode = -1;
+        Object rhsValue = null;
+        
+        if (expression.contains("=")) {
+            String[] parts = expression.split("=", 2);
+            lhsField = parts[0].trim();
+            String valueStr = parts[1].trim();
+            operatorCode = 0; // EQUALS
+            
+            if (valueStr.startsWith("'") && valueStr.endsWith("'")) {
+                rhsValue = valueStr.substring(1, valueStr.length() - 1);
+            } else {
+                try {
+                    rhsValue = Integer.parseInt(valueStr);
+                } catch (NumberFormatException e) {
+                    rhsValue = valueStr;
+                }
+            }
+        } else if (expression.contains(">")) {
+            String[] parts = expression.split(">", 2);
+            lhsField = parts[0].trim();
+            String valueStr = parts[1].trim();
+            operatorCode = 1; 
+            
+            try {
+                rhsValue = Integer.parseInt(valueStr);
+            } catch (NumberFormatException e) {
+                rhsValue = valueStr;
+            }
+        } else if (expression.contains("<")) {
+            String[] parts = expression.split("<", 2);
+            lhsField = parts[0].trim();
+            String valueStr = parts[1].trim();
+            operatorCode = 2; 
+            
+            try {
+                rhsValue = Integer.parseInt(valueStr);
+            } catch (NumberFormatException e) {
+                rhsValue = valueStr;
+            }
+        }
+        
+        if (lhsField != null && operatorCode >= 0 && rhsValue != null) {
+            System.out.println("DEBUG: Parsed WHERE: field=" + lhsField + 
+                            ", op=" + operatorCode + ", value=" + rhsValue);
+            this.pred = new DBPredicate(new DBTerm(lhsField, operatorCode, new DBConstant(rhsValue)));
+        } else {
+            System.err.println("WARNING: Could not parse WHERE clause: " + expression);
+            this.pred = new DBPredicate(); 
+        }
+        
         return super.visitWhereClause(ctx);
     }
 

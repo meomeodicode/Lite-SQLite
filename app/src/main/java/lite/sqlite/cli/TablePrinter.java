@@ -4,124 +4,79 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class TablePrinter {
-    
-    /**
-     * Prints a TableDto to the console in a formatted table.
-     * 
-     * @param tableDto the data to print
-     */
+
     public void print(TableDto tableDto) {
-        if (tableDto == null) {
-            System.out.println("No data to display");
+        
+        System.out.println("DEBUG: TablePrinter received: columns=" + tableDto.getColumnNames() + 
+                         ", rows=" + (tableDto.getRows() != null ? tableDto.getRows().size() : "null"));
+        
+        List<String> headers = tableDto.getColumnNames();
+        List<List<String>> rows = tableDto.getRows();
+        
+        if (headers == null || rows == null) {
+            System.out.println("No data available to display");
             return;
         }
+
+        List<Integer> columnWidths = new ArrayList<>();
         
-        // Handle message results (like error or update messages)
-        if (tableDto.getErrorMessage() != null && !tableDto.getErrorMessage().isEmpty()) {
-            System.out.println(tableDto.getErrorMessage());
-            return;
+        for (String header : headers) {
+            columnWidths.add(header.length());
         }
         
-        // Handle query results
-        if (tableDto.getColumnNames() == null || tableDto.getColumnNames() == null) {
-            System.out.println("No data to display");
-            return;
-        }
-        
-        List<Integer> columnWidths = calculateColumnWidths(tableDto);
-        
-        // Print header
-        printRow(tableDto.getColumnNames(), columnWidths);
-        printSeparator(columnWidths);
-        
-        // Print rows
-        for (List<String> row : tableDto.getRowValues()) {
-            printRow(row, columnWidths);
-        }
-        
-        // Print row count
-        System.out.println(tableDto.getColumnNames().size() + " row(s) returned");
-    }
-    
-    /**
-     * Calculates the width of each column based on content.
-     * 
-     * @param tableDto the table data
-     * @return a list of column widths
-     */
-    private List<Integer> calculateColumnWidths(TableDto tableDto) {
-        List<Integer> widths = new ArrayList<>();
-        
-        // Initialize with header widths
-        for (String columnName : tableDto.getColumnNames()) {
-            widths.add(Math.max(columnName.length(), 5));
-        }
-        
-        // Update with data widths
-        for (List<String> row : tableDto.getRowValues()) {
-            for (int i = 0; i < row.size() && i < widths.size(); i++) {
+
+        for (List<String> row : rows) {
+            for (int i = 0; i < row.size() && i < headers.size(); i++) {
                 String value = row.get(i);
                 if (value != null) {
-                    widths.set(i, Math.max(widths.get(i), value.length()));
+                    columnWidths.set(i, Math.max(columnWidths.get(i), value.length()));
                 }
             }
         }
         
         // Add padding
-        for (int i = 0; i < widths.size(); i++) {
-            widths.set(i, widths.get(i) + 2);
+        for (int i = 0; i < columnWidths.size(); i++) {
+            columnWidths.set(i, columnWidths.get(i) + 2);
         }
         
-        return widths;
+        // Print table
+        printSeparator(columnWidths);
+        printRow(headers, columnWidths);
+        printSeparator(columnWidths);
+        
+        for (List<String> row : rows) {
+            printRow(row, columnWidths);
+        }
+        
+        printSeparator(columnWidths);
+        System.out.println(rows.size() + " row(s) returned");
     }
     
-    /**
-     * Prints a row of data with proper formatting.
-     * 
-     * @param values the values in the row
-     * @param widths the widths of each column
-     */
-    private void printRow(List<String> values, List<Integer> widths) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("|");
-        
-        for (int i = 0; i < values.size() && i < widths.size(); i++) {
-            String value = values.get(i);
-            if (value == null) {
-                value = "NULL";
+    private void printSeparator(List<Integer> columnWidths) {
+        for (Integer width : columnWidths) {
+            System.out.print("+");
+            for (int i = 0; i < width; i++) {
+                System.out.print("-");
             }
+        }
+        System.out.println("+");
+    }
+    
+    private void printRow(List<String> values, List<Integer> columnWidths) {
+        for (int i = 0; i < values.size() && i < columnWidths.size(); i++) {
+            String value = values.get(i);
+            int width = columnWidths.get(i);
             
-            int width = widths.get(i);
-            builder.append(" ");
-            builder.append(value);
+            System.out.print("| ");
+            System.out.print(value);
             
             // Pad with spaces
-            for (int j = value.length() + 1; j < width; j++) {
-                builder.append(" ");
+            for (int j = 0; j < width - value.length() - 2; j++) {
+                System.out.print(" ");
             }
             
-            builder.append("|");
+            System.out.print(" ");
         }
-        
-        System.out.println(builder.toString());
-    }
-    
-    /**
-     * Prints a separator line.
-     * 
-     * @param widths the widths of each column
-     */
-    private void printSeparator(List<Integer> widths) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("+");
-        
-        for (int width : widths) {
-            for (int i = 0; i < width; i++) {
-                builder.append("-");
-            }
-            builder.append("+");
-        }
-        
-        System.out.println(builder.toString());
+        System.out.println("|");
     }
 }

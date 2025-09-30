@@ -11,6 +11,7 @@ import lite.sqlite.server.scan.RORecordScan;
  * Terms in a predicate are combined with logical AND (conjunction).
  */
 public class DBPredicate {
+    
     private List<DBTerm> terms = new ArrayList<DBTerm>();
 
     /**

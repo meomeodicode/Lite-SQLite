@@ -16,7 +16,7 @@ public class TableDto {
     public TableDto(List<String> columnNames, List<List<String>> rowValues) {
         this.columnNames = columnNames;
         this.rowValues = rowValues;
-        this.errorMessage = "";
+        this.errorMessage = null;
     }
 
     public TableDto(String message) {
