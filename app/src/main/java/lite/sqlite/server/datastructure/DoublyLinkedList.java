@@ -1,4 +1,4 @@
-package lite.sqlite.server.storage;
+package lite.sqlite.server.datastructure;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;

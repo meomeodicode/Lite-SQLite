@@ -7,7 +7,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 
 import javax.management.RuntimeErrorException;
-import lite.sqlite.server.storage.DoublyLinkedList.Node;
+
+import lite.sqlite.server.datastructure.DoublyLinkedList;
+import lite.sqlite.server.datastructure.DoublyLinkedList.Node;
 
 public class LRUCache<K,V> {
     private static class CacheEntry<K,V> {
@@ -89,9 +91,9 @@ public class LRUCache<K,V> {
             }
             
             hits++;
-            V nodeValue = node.data.value;
+            V nodeValue = node.getData().value;
             lruList.moveToLast(node);
-            node.data.recordAccess();
+            node.getData().recordAccess();
             return nodeValue;
         } catch (Exception e) {
             // throw new RuntimeErrorException(e, "Get error LRU cache");
@@ -106,8 +108,8 @@ public class LRUCache<K,V> {
         try {
             Node<CacheEntry<K,V>> existingNode = hashTable.get(key);
             if (existingNode != null) {
-                existingNode.data.value = value;
-                existingNode.data.recordAccess();
+                existingNode.getData().value = value;
+                existingNode.getData().recordAccess();
                 lruList.moveToLast(existingNode);
                 return;
             }
@@ -137,7 +139,7 @@ public class LRUCache<K,V> {
         
         Node<CacheEntry<K,V>> current = lruList.getFirstNode();
         while (current != null) {
-            CacheEntry<K,V> entry = current.data;
+            CacheEntry<K,V> entry = current.getData();
             boolean pinned = false;
             if (entry.value instanceof Frame) {
                 Frame frame = (Frame) entry.value;
@@ -184,7 +186,7 @@ public class LRUCache<K,V> {
         }
 
         if (victim != null) {
-            CacheEntry<K,V> entry = victim.data;
+            CacheEntry<K,V> entry = victim.getData();
             K key = entry.key;
             V value = entry.value;
             lruList.unlinkNode(victim);
