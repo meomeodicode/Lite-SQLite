@@ -23,18 +23,17 @@ public class TestCLI {
     // private static AtomicInteger testsFailed = new AtomicInteger(0);
 
     public static void main(String[] args) {
-        BplusTree<Integer, String> tree = new BplusTree<>(3);
         
-        tree.insert(10, "ten");
-        tree.insert(20, "twenty");
-        tree.insert(5, "five");
-        tree.insert(15, "fifteen");
-        tree.insert(25, "twenty-five");
+        BplusTree<Integer, String> tree = new BplusTree<>(3);
+        tree.insert(1, "one");
+        tree.insert(2, "two");
+        tree.insert(3, "three");
+        tree.insert(4, "four");
         
         tree.printTree();
         
-        System.out.println("\nSearch 15: " + tree.search(15));
-        System.out.println("Search 100: " + tree.search(100));
+        System.out.println("\nSearch 1: " + tree.search(1));
+        System.out.println("Search 3: " + tree.search(3));
     }
     //     System.out.println("Lite-SQLite Enhanced Test Harness");
     //     System.out.println("================================");

@@ -7,7 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Getter
-@Setter
+@Setter    
 public class BplusTreeNode<K extends Comparable<K>,V> {
     
     private boolean isLeaf;
@@ -34,6 +34,6 @@ public class BplusTreeNode<K extends Comparable<K>,V> {
     }
 
     public boolean isFull(int maxDegree) {
-        return keys.size() >= maxDegree - 1;
+        return keys.size() >= maxDegree;
     }
 }
