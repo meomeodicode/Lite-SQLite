@@ -28,4 +28,9 @@ public class ParserImpl implements Parser {
     public Object updateCmd() {
         return sqlStatementVisitor.getValue();
     }
+
+    @Override
+    public Object indexCmd() {
+        return sqlStatementVisitor.getValue();
+    }
 }

@@ -22,6 +22,10 @@ public class TableDto {
     public TableDto(String message) {
         this.errorMessage = message;
     }
+
+    public TableDto(String columnName, String message) {
+        this(columnName);
+    }
     
     public static TableDto forError(String errorMessage) {
         return new TableDto("ERROR: " + errorMessage);
@@ -30,6 +34,10 @@ public class TableDto {
     public static TableDto forUpdateResult(int affectedRows) {
         return new TableDto(List.of("result"), List.of(List.of(affectedRows + " row(s) affected")));
     } 
+
+    public static TableDto forIndexResult(String columnName) {
+        return new TableDto(columnName, "indexed");
+    }
     
     public List<List<String>> getRows() {
         return rowValues;

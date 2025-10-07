@@ -3,6 +3,7 @@ package lite.sqlite.server.storage.record;
 import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
+import lite.sqlite.server.storage.table.RecordId;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -210,8 +211,7 @@ public class RecordPage {
             if (recordOffset != -1) {
                 Object[] record = getRecord(slot);
                 if (record != null) {
-                    result.add(new RecordWithSlot(record, slot));
-            
+                    result.add(new RecordWithSlot(record, slot, blockId));
                 }
             }
         }
@@ -415,10 +415,12 @@ public class RecordPage {
     public static class RecordWithSlot {
         private Object[] record;
         private int slot;
+        private Block block;  // Add this!
         
-        public RecordWithSlot(Object[] record, int slot) {
+        public RecordWithSlot(Object[] record, int slot, Block block) {
             this.record = record;
             this.slot = slot;
+            this.block = block;
         }
         
         public Object[] getRecord() {
@@ -428,6 +430,15 @@ public class RecordPage {
         public int getSlot() {
             return slot;
         }
+        
+        public Block getBlock() {
+            return block;
+        }
+        
+        public RecordId toRecordId() {
+            return new RecordId(block, slot);
+        }
+
     }
 
     public void visualizePage() {

@@ -7,23 +7,48 @@ import lite.sqlite.server.queryengine.QueryEngine;
 import lite.sqlite.server.queryengine.QueryEngineImpl;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Enhanced command-line tool for testing the query engine.
- * Includes comprehensive tests and result validation.
+ * Simple command-line tool for testing basic query engine functionality.
  */
 public class TestCLI {
 
-    // private static TablePrinter printer = new TablePrinter();
-    // private static QueryEngine engine;
-    // private static AtomicInteger testsPassed = new AtomicInteger(0);
-    // private static AtomicInteger testsFailed = new AtomicInteger(0);
+    private static TablePrinter printer = new TablePrinter();
+    private static QueryEngine engine;
 
     public static void main(String[] args) {
         
+        // Test B+ Tree first
+        System.out.println("=== B+ Tree Test ===");
+        testBPlusTree();
+        
+        System.out.println("\n\nLite-SQLite Simple Test");
+        System.out.println("=======================");
+        
+        try {
+            // Clean up old data
+            cleanupTestData();
+            
+            // Initialize engine
+            engine = new QueryEngineImpl();
+            
+            // Run basic tests
+            testBasicFunctionality();
+            testIndexFunctionality();
+            
+            System.out.println("\n✅ All tests completed successfully!");
+            
+        } catch (Exception e) {
+            System.err.println("❌ Test failed: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            if (engine instanceof QueryEngineImpl) {
+                ((QueryEngineImpl) engine).close();
+            }
+        }
+    }
+    
+    private static void testBPlusTree() {
         BplusTree<Integer, String> tree = new BplusTree<>(3);
         tree.insert(1, "one");
         tree.insert(2, "two");
@@ -35,219 +60,93 @@ public class TestCLI {
         System.out.println("\nSearch 1: " + tree.search(1));
         System.out.println("Search 3: " + tree.search(3));
     }
-    //     System.out.println("Lite-SQLite Enhanced Test Harness");
-    //     System.out.println("================================");
+    
+    private static void testBasicFunctionality() {
+        System.out.println("\n=== Basic Database Operations ===");
         
-    //     try {
-    //         // Clean up any old test data
-    //         cleanupTestData();
-            
-    //         // Initialize the query engine
-    //         engine = new QueryEngineImpl();
-            
-    //         // Core functionality tests
-    //         runTest("Schema Creation", TestCLI::testCreateTable);
-    //         runTest("Basic Insert", TestCLI::testInsertData);
-    //         runTest("Basic Select", TestCLI::testSelectData);
-    //         runTest("Column Projection", TestCLI::testColumnProjection);
-            
-    //         // WHERE clause tests
-    //         runTest("Equality Filter", TestCLI::testEqualityFilter);
-    //         runTest("Range Filter", TestCLI::testRangeFilter);
-    //         runTest("Multiple Conditions", TestCLI::testMultipleConditions);
-            
-    //         // Error cases
-    //         runTest("Error Handling", TestCLI::testErrorHandling);
-            
-    //         // Print summary
-    //         System.out.println("\n=== Test Summary ===");
-    //         System.out.println("Passed: " + testsPassed.get());
-    //         System.out.println("Failed: " + testsFailed.get());
-            
-    //     } catch (Exception e) {
-    //         System.err.println("Test framework failed with exception: " + e.getMessage());
-    //         e.printStackTrace();
-    //     } finally {
-    //         // Clean up resources
-    //         if (engine instanceof QueryEngineImpl) {
-    //             ((QueryEngineImpl) engine).close();
-    //         }
-    //     }
-    // }
-    
-    // private static void cleanupTestData() {
-    //     File dbDir = new File("database");
-    //     if (dbDir.exists()) {
-    //         for (File file : dbDir.listFiles()) {
-    //             if (file.getName().endsWith(".tbl")) {
-    //                 file.delete();
-    //             }
-    //         }
-    //     }
-    // }
-    
-    // private static void runTest(String testName, Runnable testCase) {
-    //     System.out.println("\n=== Running Test: " + testName + " ===");
-    //     try {
-    //         testCase.run();
-    //         System.out.println("✅ " + testName + " - PASSED");
-    //         testsPassed.incrementAndGet();
-    //     } catch (AssertionError | Exception e) {
-    //         System.err.println("❌ " + testName + " - FAILED: " + e.getMessage());
-    //         e.printStackTrace();
-    //         testsFailed.incrementAndGet();
-    //     }
-    // }
-    
-    // private static void testCreateTable() {
-    //     // Create test tables
-    //     assertSuccess("CREATE TABLE customers (id INTEGER, name VARCHAR(100), balance INTEGER)");
-    //     assertSuccess("CREATE TABLE products (id INTEGER, name VARCHAR(100), price INTEGER, category VARCHAR(50))");
-    // }
-    
-    // private static void testInsertData() {
-    //     // Insert customers data
-    //     assertSuccess("INSERT INTO customers (id, name, balance) VALUES (1, 'Alice Johnson', 500)");
-    //     assertSuccess("INSERT INTO customers (id, name, balance) VALUES (2, 'Bob Smith', 1200)");
-    //     assertSuccess("INSERT INTO customers (id, name, balance) VALUES (3, 'Carol Williams', 750)");
+        // 1. Create a simple table
+        System.out.println("\n1. Creating table...");
+        execute("CREATE TABLE students (id INTEGER, name VARCHAR(50), grade INTEGER)");
         
-    //     // Insert products data
-    //     assertSuccess("INSERT INTO products (id, name, price, category) VALUES (101, 'Laptop', 1200, 'Electronics')");
-    //     assertSuccess("INSERT INTO products (id, name, price, category) VALUES (102, 'Book', 25, 'Books')");
-    //     assertSuccess("INSERT INTO products (id, name, price, category) VALUES (103, 'Phone', 800, 'Electronics')");
-    //     assertSuccess("INSERT INTO products (id, name, price, category) VALUES (104, 'Desk', 350, 'Furniture')");
-    // }
-    
-    // private static void testSelectData() {
-    //     // Basic select tests
-    //     TableDto result = assertQuery("SELECT * FROM customers");
-    //     assertRowCount(result, 3);
+        // 2. Insert some data
+        System.out.println("\n2. Inserting data...");
+        execute("INSERT INTO students (id, name, grade) VALUES (1, 'Alice', 85)");
+        execute("INSERT INTO students (id, name, grade) VALUES (2, 'Bob', 92)");
+        execute("INSERT INTO students (id, name, grade) VALUES (3, 'Charlie', 78)");
+        execute("INSERT INTO students (id, name, grade) VALUES (4, 'Diana', 95)");
         
-    //     result = assertQuery("SELECT * FROM products");
-    //     assertRowCount(result, 4);
-    // }
+        // 3. Basic queries
+        System.out.println("\n3. Basic SELECT queries...");
+        execute("SELECT * FROM students");
+        execute("SELECT name, grade FROM students");
+        execute("SELECT name FROM students WHERE grade > 80");
+        execute("SELECT * FROM students WHERE id = 2");
+    }
     
-    // private static void testColumnProjection() {
-    //     TableDto result = assertQuery("SELECT name, balance FROM customers");
-    //     assertColumnCount(result, 2);
-    //     assertColumnsExist(result, "name", "balance");
+    private static void testIndexFunctionality() {
+        System.out.println("\n=== Index Operations ===");
         
-    //     result = assertQuery("SELECT name, price, category FROM products");
-    //     assertColumnCount(result, 3);
-    //     assertColumnsExist(result, "name", "price", "category");
-    // }
-    
-    // private static void testEqualityFilter() {
-    //     TableDto result = assertQuery("SELECT name FROM customers WHERE id = 2");
-    //     assertRowCount(result, 1);
-    //     assertCellValue(result, 0, 0, "Bob Smith");
+        // 1. Create indexes
+        System.out.println("\n1. Creating indexes...");
+        execute("CREATE INDEX idx_student_id ON students(id)");
+        execute("CREATE INDEX idx_student_grade ON students(grade)");
         
-    //     result = assertQuery("SELECT name, price FROM products WHERE category = 'Electronics'");
-    //     assertRowCount(result, 2);
-    // }
-    
-    // private static void testRangeFilter() {
-    //     TableDto result = assertQuery("SELECT id, name FROM customers WHERE balance > 700");
-    //     assertRowCount(result, 2);
+        // 2. Queries that should use indexes
+        System.out.println("\n2. Index-optimized queries...");
+        execute("SELECT * FROM students WHERE id = 1");
+        execute("SELECT * FROM students WHERE id = 3");
+        execute("SELECT name FROM students WHERE id = 4");
         
-    //     result = assertQuery("SELECT name FROM products WHERE price < 500");
-    //     assertRowCount(result, 2);
-    //     assertCellValue(result, 0, 0, "Book");
-    // }
-    
-    // private static void testMultipleConditions() {
-    //     // This test would require support for AND/OR in WHERE clauses
-    //     // For now, we'll just mark it as a placeholder
-    //     System.out.println("Test for multiple conditions not implemented yet");
-    // }
-    
-    // private static void testErrorHandling() {
-    //     // Test for non-existent table
-    //     TableDto result = engine.doQuery("SELECT * FROM nonexistent_table");
-    //     assertHasError(result);
+        // 3. Performance test with simple timing
+        System.out.println("\n3. Simple performance test...");
         
-    //     // Test for invalid column
-    //     result = engine.doQuery("SELECT invalid_column FROM customers");
-    //     assertHasError(result);
-    // }
-    
-    // // Helper methods for assertions
-    
-    // private static TableDto assertQuery(String sql) {
-    //     System.out.println("\nExecuting: " + sql);
-    //     TableDto result = engine.doQuery(sql);
-    //     if (result.getErrorMessage() != null) {
-    //         throw new AssertionError("Query failed: " + result.getErrorMessage());
-    //     }
-    //     printer.print(result);
-    //     return result;
-    // }
-    
-    // private static void assertSuccess(String sql) {
-    //     System.out.println("\nExecuting: " + sql);
-    //     TableDto result;
-    //     if (sql.trim().toUpperCase().startsWith("SELECT")) {
-    //         result = engine.doQuery(sql);
-    //     } else {
-    //         result = engine.doUpdate(sql);
-    //     }
+        long startTime = System.currentTimeMillis();
+        for (int i = 1; i <= 4; i++) {
+            TableDto result = engine.doQuery("SELECT * FROM students WHERE id = " + i);
+            System.out.println("Found student: " + result.getRows().get(0).get(1)); // Print name
+        }
+        long endTime = System.currentTimeMillis();
         
-    //     if (result.getErrorMessage() != null) {
-    //         throw new AssertionError("Statement failed: " + result.getErrorMessage());
-    //     }
-    //     printer.print(result);
-    // }
-    
-    // private static void assertRowCount(TableDto result, int expected) {
-    //     int actual = result.getRows().size();
-    //     if (actual != expected) {
-    //         throw new AssertionError("Expected " + expected + " rows but got " + actual);
-    //     }
-    // }
-    
-    // private static void assertColumnCount(TableDto result, int expected) {
-    //     int actual = result.getColumnNames().size();
-    //     if (actual != expected) {
-    //         throw new AssertionError("Expected " + expected + " columns but got " + actual);
-    //     }
-    // }
-    
-    // private static void assertColumnsExist(TableDto result, String... columnNames) {
-    //     List<String> actualColumns = result.getColumnNames();
-    //     for (String column : columnNames) {
-    //         if (!actualColumns.contains(column)) {
-    //             throw new AssertionError("Expected column '" + column + "' not found");
-    //         }
-    //     }
-    // }
-    
-    // private static void assertCellValue(TableDto result, int row, int col, String expected) {
-    //     String actual = result.getRows().get(row).get(col);
-    //     if (!expected.equals(actual)) {
-    //         throw new AssertionError("Expected value '" + expected + "' at [" + row + "," + col + "] but got '" + actual + "'");
-    //     }
-    // }
-    
-    // private static void assertHasError(TableDto result) {
-    //     if (result.getErrorMessage() == null) {
-    //         throw new AssertionError("Expected an error but none was returned");
-    //     }
-    // }
-    
-    // private static void executeAndPrint(String sql) {
-    //     System.out.println("\nExecuting: " + sql);
+        System.out.println("✓ Completed 4 lookups in " + (endTime - startTime) + "ms");
         
-    //     TableDto result;
-    //     if (sql.trim().toUpperCase().startsWith("SELECT")) {
-    //         result = engine.doQuery(sql);
-    //     } else {
-    //         result = engine.doUpdate(sql);
-    //     }
+        // 4. Range query
+        System.out.println("\n4. Range query...");
+        execute("SELECT name FROM students WHERE grade > 85");
+    }
+    
+    private static void execute(String sql) {
+        System.out.println("\nSQL: " + sql);
         
-    //     if (result.getErrorMessage() != null) {
-    //         System.out.println("ERROR: " + result.getErrorMessage());
-    //     } else {
-    //         printer.print(result);
-    //     }
-    // }
+        TableDto result;
+        
+        // Route to appropriate method based on SQL type
+        if (sql.trim().toUpperCase().startsWith("SELECT")) {
+            result = engine.doQuery(sql);
+        } else if (sql.trim().toUpperCase().contains("CREATE INDEX")) {
+            result = engine.doCreateIndex(sql);
+        } else {
+            result = engine.doUpdate(sql);
+        }
+        
+        // Print result or error
+        if (result.getErrorMessage() != null) {
+            System.out.println("❌ ERROR: " + result.getErrorMessage());
+        } else {
+            System.out.println("✅ SUCCESS");
+            if (!result.getRows().isEmpty()) {
+                printer.print(result);
+            }
+        }
+    }
+    
+    private static void cleanupTestData() {
+        File dbDir = new File("database");
+        if (dbDir.exists()) {
+            for (File file : dbDir.listFiles()) {
+                if (file.getName().endsWith(".tbl")) {
+                    file.delete();
+                }
+            }
+        }
+    }
 }

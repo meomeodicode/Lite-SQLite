@@ -3,6 +3,9 @@ package lite.sqlite.server.model.domain.clause;
 import java.io.Serializable;
 import java.util.Objects;
 
+import lombok.Getter;
+
+@Getter
 public class DBConstant implements Comparable<DBConstant>, Serializable {
 
     private Object val;

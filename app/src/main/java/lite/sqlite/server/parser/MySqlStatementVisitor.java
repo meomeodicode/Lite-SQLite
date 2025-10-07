@@ -62,6 +62,18 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitCreateIndex(MySQLStatementParser.CreateIndexContext ctx) {
         commandType = CommandType.CREATE_INDEX;
+        String fullText = ctx.getText();
+        int openParen = fullText.lastIndexOf('(');
+        int closeParen = fullText.lastIndexOf(')');
+        
+        if (openParen >= 0 && closeParen > openParen) {
+            this.indexFieldName = fullText.substring(openParen + 1, closeParen);
+            System.out.println("DEBUG: Extracted index column name: " + this.indexFieldName);
+        } else {
+            this.indexFieldName = "";
+            System.out.println("WARNING: Could not extract index column name from: " + fullText);
+        }
+        
         return super.visitCreateIndex(ctx);
     }
 
@@ -319,7 +331,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             case CREATE_TABLE:
                 return new CreateTableData(tableName, tableDTO);
             case CREATE_INDEX:
-                return new CreateIndexData(indexName, tableName, indexFieldName);
+                return new CreateIndexData(indexName, tableName, indexFieldName, false);
             default:
                 return null;
         }

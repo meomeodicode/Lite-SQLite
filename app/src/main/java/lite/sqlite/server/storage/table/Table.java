@@ -10,47 +10,119 @@ import java.util.NoSuchElementException;
 import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
+import lite.sqlite.server.storage.index.Index;
+import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
 import lite.sqlite.server.storage.record.RecordPage;
 import lite.sqlite.server.storage.record.RecordPage.RecordWithSlot;
 import lite.sqlite.server.storage.record.Schema;
-
 
 public class Table implements Iterable<Record> {
 
     private final String tableName;
     private final Schema schema;
     private final BufferPool bufferPool;
-    private int recordCount = 0;                    // Track directly in Table
-    private long lastModified = System.currentTimeMillis();
-
+    private List<Index<?>> indexes;  // Add this field
+    
     public Table(Schema schema, BufferPool bufferPool, String tableName) {
         this.tableName = tableName;
         this.bufferPool = bufferPool;
         this.schema = schema;
+        this.indexes = new ArrayList<>();  // Initialize here
     }
     
-    public String getTableName() {
-        return this.tableName;
+    // Index management methods
+    public Index<?> createTypedIndex(String columnName, String tableName, String indexName, boolean isUnique, DataType columnType) throws IOException {
+        // Check if index already exists
+        for (Index<?> existingIndex : indexes) {
+            if (existingIndex.getIndexName().equals(indexName)) {
+                throw new IllegalArgumentException("Index '" + indexName + "' already exists");
+            }
+        }
+        
+        // Validate column exists
+        int columnIndex = schema.getColumnIndex(columnName);
+        if (columnIndex == -1) {
+            throw new IllegalArgumentException("Column '" + columnName + "' does not exist");
+        }
+        
+        // Create index based on column type
+        Index<?> newIndex;
+        switch (columnType) {
+            case INTEGER:
+                newIndex = new Index<Integer>(indexName, tableName, columnName, isUnique, 100);
+                break;
+            case VARCHAR:
+                newIndex = new Index<String>(indexName, tableName, columnName, isUnique, 100);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported column type for indexing: " + columnType);
+        }
+        
+        // Populate index with existing data
+        populateIndex(newIndex, columnIndex);
+        
+        // Add to indexes list
+        indexes.add(newIndex);
+        
+        return newIndex;
     }
     
-    public Schema getSchema() {
-        return this.schema;
-    }
-
-    public String getFileName() {
-        return this.tableName + ".tbl";
+    public Index<?> findIndexForColumn(String columnName) {
+        for (Index<?> index : indexes) {
+            if (index.getColumnName().equals(columnName)) {
+                return index;
+            }
+        }
+        return null;
     }
     
-    /**
-     * Inserts a record into the table.
-     * 
-     * @param record The record to insert
-     * @return The RecordId that identifies where the record was inserted
-     * @throws IOException if an I/O error occurs
-     */
+    public List<Index<?>> getIndexes() {
+        return new ArrayList<>(indexes);
+    }
+    
+    private void populateIndex(Index<?> index, int columnIndex) throws IOException {
+        String filename = getFileName();
+        int blockNum = 0;
+        
+        while (true) {
+            try {
+                Block block = new Block(filename, blockNum);
+                Page page = bufferPool.pinBlock(block);
+                
+                try {
+                    RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+                    
+                    for (RecordWithSlot rws : recordPage.getAllRecords()) {
+                        Object[] values = rws.getRecord();
+                        Object valueObj = values[columnIndex];
+                        
+                        if (valueObj != null && valueObj instanceof Comparable) {
+                            try {
+                                RecordId rid = rws.toRecordId();
+                                updateIndexTyped(index, (Comparable) valueObj, rid);
+                            } catch (Exception e) {
+                                System.err.println("Warning: Failed to index record: " + e.getMessage());
+                            }
+                        }
+                    }
+                } finally {
+                    bufferPool.unpinBlock(block);
+                }
+                
+                blockNum++;
+            } catch (Exception e) {
+                break; // No more blocks
+            }
+        }
+    }
+    
+    @SuppressWarnings("unchecked")
+    private <K extends Comparable<K>> void updateIndexTyped(Index<?> index, Comparable value, RecordId rid) {
+        ((Index<K>) index).insert((K) value, rid);
+    }
+    
     public RecordId insertRecord(Record record) throws IOException {
-
         String filename = this.getFileName();
         Block block = new Block(filename, 0); 
         Page page = bufferPool.pinBlock(block);
@@ -58,6 +130,26 @@ public class Table implements Iterable<Record> {
         RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
         
         try {
+            if (!indexes.isEmpty()) {
+                for (Index<?> index : indexes) {
+                    if (index.isUnique()) {
+                        String colName = index.getColumnName();
+                        int colIndex = schema.getColumnIndex(colName);
+                        Object value = record.getValues()[colIndex];
+                        
+                        if (value instanceof Comparable) {
+                            RecordId existingRid = searchInIndexTyped(index, (Comparable) value);
+                            if (existingRid != null) {
+                                throw new IllegalArgumentException(
+                                    "Duplicate key '" + value + "' in unique index '" + 
+                                    index.getIndexName() + "'"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            
             boolean inserted = recordPage.insert(record.getValues());
             
             if (!inserted) {
@@ -66,166 +158,137 @@ public class Table implements Iterable<Record> {
             
             int recordCount = recordPage.getRecordCount();
             int slot = recordCount - 1;
+            
+            RecordId rid = new RecordId(block, slot);
+            
+            // Update all indexes AFTER successful insert
+            if (!indexes.isEmpty()) {
+                for (Index<?> index : indexes) {
+                    String colName = index.getColumnName();
+                    int colIndex = schema.getColumnIndex(colName);
+                    Object value = record.getValues()[colIndex];
+                    
+                    if (value instanceof Comparable) {
+                        try {
+                            updateIndexTyped(index, (Comparable) value, rid);
+                        } catch (Exception e) {
+                            System.err.println("Warning: Failed to update index: " + e.getMessage());
+                        }
+                    }
+                }
+            }
+            
             touch();
-            return new RecordId(block, slot);
+            return rid;
         } finally {
             bufferPool.unpinBlock(block);
         }
     }
     
-    /**
-     * Gets a record from the table.
-     * 
-     * @param rid The RecordId that identifies the record
-     * @return The record
-     * @throws IOException if an I/O error occurs
-     */
+    @SuppressWarnings("unchecked")
+    private <K extends Comparable<K>> RecordId searchInIndexTyped(Index<?> index, Comparable value) {
+        return ((Index<K>) index).search((K) value);
+    }
+    
     public Record getRecord(RecordId rid) throws IOException {
         Block block = rid.getBlockId();
-        int slot = rid.getSlotNumber();
-        
         Page page = bufferPool.pinBlock(block);
-        RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
         
         try {
-            Object[] values = recordPage.getRecord(slot);
+            RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+            Object[] values = recordPage.getRecord(rid.getSlotNumber());
+            
             if (values == null) {
-                throw new NoSuchElementException("No record exists at the specified location");
+                return null;
             }
+            
             return new Record(values);
         } finally {
             bufferPool.unpinBlock(block);
         }
     }
     
-    /**
-     * Updates a record in the table.
-     * 
-     * @param rid The RecordId that identifies the record to update
-     * @param record The new record data
-     * @throws IOException if an I/O error occurs
-     */
-    public void updateRecord(RecordId rid, Record record) throws IOException {
-        Block block = rid.getBlockId();
-        int slot = rid.getSlotNumber();
-        
-        Page page = bufferPool.pinBlock(block);
-        RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
-        
-        try {
-            boolean updated = recordPage.update(slot, record.getValues());
-            if (!updated) {
-                throw new NoSuchElementException("No record exists at the specified location or update failed");
-            }
-            touch(); // Update last modified time
-        } finally {
-            bufferPool.unpinBlock(block);
-        }
+    // Existing methods
+    public Schema getSchema() {
+        return schema;
     }
     
-    /**
-     * Deletes a record from the table.
-     * 
-     * @param rid The RecordId that identifies the record to delete
-     * @throws IOException if an I/O error occurs
-     */
-    public void deleteRecord(RecordId rid) throws IOException {
-        Block block = rid.getBlockId();
-        int slot = rid.getSlotNumber();
-        
-        Page page = bufferPool.pinBlock(block);
-        RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
-        
-        try {
-            boolean deleted = recordPage.delete(slot);
-            if (!deleted) {
-                throw new NoSuchElementException("No record exists at the specified location");
-            }
-            touch();
-        } finally {
-            bufferPool.unpinBlock(block);
-        }
-    }
-
-    private void touch() {
-        this.lastModified = System.currentTimeMillis();
+    public String getTableName() {
+        return tableName;
     }
     
-    /**
-     * Returns an iterator over all records in the table.
-     * 
-     * @return An iterator over all records
-     */
+    private String getFileName() {
+        return tableName + ".tbl";
+    }
+    
+    private void touch() throws IOException {
+        // Implementation for table metadata updates
+    }
+    
     @Override
     public Iterator<Record> iterator() {
-        try {
-            return new TableIterator();
-        } catch (IOException e) {
-            throw new RuntimeException("Error creating table iterator: " + e.getMessage(), e);
-        }
+        return new TableIterator();
     }
     
-    /**
-     * Inner class for iterating over the records in the table.
-     */
     private class TableIterator implements Iterator<Record> {
-    private List<RecordWithSlot> records;
-    private int currentIndex = 0;
-    
-    public TableIterator() throws IOException {
-        records = getAllRecordsFromAllBlocks();
-    }
-    
-    private List<RecordWithSlot> getAllRecordsFromAllBlocks() throws IOException {
-        List<RecordWithSlot> allRecords = new ArrayList<>();
-        String filename = getFileName();
+        private int currentBlockNum = 0;
+        private List<RecordWithSlot> currentRecords = new ArrayList<>();
+        private int currentRecordIndex = 0;
+        private boolean hasMoreBlocks = true;
         
-        int blockId = 0;
-        boolean hasMoreBlocks = true;
+        public TableIterator() {
+            loadNextBlock();
+        }
         
-        while (hasMoreBlocks) {
+        private void loadNextBlock() {
+            currentRecords.clear();
+            currentRecordIndex = 0;
+            
+            if (!hasMoreBlocks) return;
+            
             try {
-                Block block = new Block(filename, blockId);
+                String filename = getFileName();
+                Block block = new Block(filename, currentBlockNum);
                 Page page = bufferPool.pinBlock(block);
                 
                 try {
-                    RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
-                    List<RecordWithSlot> blockRecords = recordPage.getAllRecords();
-                    
-                    if (blockRecords != null && !blockRecords.isEmpty()) {
-                        allRecords.addAll(blockRecords);
-                        blockId++; // Try the next block
-                    } else {
-                        // No records in this block - might be the end
-                        hasMoreBlocks = (blockId == 0); // Only continue if this was block 0
-                    }
+                    RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+                    currentRecords = recordPage.getAllRecords();
+                    currentBlockNum++;
                 } finally {
                     bufferPool.unpinBlock(block);
                 }
             } catch (Exception e) {
-                // If we can't access a block, we've reached the end
-                System.out.println("DEBUG: Reached end of blocks at " + blockId);
+                hasMoreBlocks = false;
+            }
+            
+            if (currentRecords.isEmpty()) {
                 hasMoreBlocks = false;
             }
         }
         
-        return allRecords;
-    }
-    
-    @Override
-    public boolean hasNext() {
-        return currentIndex < records.size();
-    }
-    
-    @Override
-    public Record next() {
-        if (!hasNext()) {
-            throw new NoSuchElementException();
+        @Override
+        public boolean hasNext() {
+            if (currentRecordIndex < currentRecords.size()) {
+                return true;
+            }
+            
+            if (hasMoreBlocks) {
+                loadNextBlock();
+                return currentRecordIndex < currentRecords.size();
+            }
+            
+            return false;
         }
         
-        RecordWithSlot recordWithSlot = records.get(currentIndex++);
-        Object[] values = recordWithSlot.getRecord();
-        return new Record(values);
-    }
+        @Override
+        public Record next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            
+            RecordWithSlot rws = currentRecords.get(currentRecordIndex++);
+            return new Record(rws.getRecord());
+        }
     }
 }

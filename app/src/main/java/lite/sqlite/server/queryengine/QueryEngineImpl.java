@@ -6,12 +6,16 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+import org.checkerframework.checker.units.qual.K;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.server.Parser;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lite.sqlite.server.model.domain.clause.DBTerm;
+import lite.sqlite.server.model.domain.commands.CreateIndexData;
 import lite.sqlite.server.model.domain.commands.CreateTableData;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
@@ -20,6 +24,7 @@ import lite.sqlite.server.scan.RORecordScan;
 import lite.sqlite.server.scan.RORecordScanImpl;
 import lite.sqlite.server.storage.BasicFileManager;
 import lite.sqlite.server.storage.buffer.BufferPool;
+import lite.sqlite.server.storage.index.Index;
 import lite.sqlite.server.storage.table.RecordId;
 import lite.sqlite.server.storage.table.Table;
 import lite.sqlite.server.storage.record.DataType;
@@ -73,6 +78,52 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    @Override
+    public TableDto doCreateIndex(String sql) {
+        try {
+            Parser parser = new ParserImpl(sql);
+            Object command = parser.indexCmd();
+            
+            if (command instanceof CreateIndexData) {
+                return executeCreateIndex((CreateIndexData) command);
+            } else {
+                return TableDto.forError("Unknown update command");
+            }
+        } catch (Exception e) {
+            return TableDto.forError("Update error: " + e.getMessage());
+        }
+    }
+
+    private TableDto executeCreateIndex(CreateIndexData command) {
+        
+        String columnName = command.getFieldname();
+        String indexName = command.getIdxname();
+        String tableName = command.getTblname();
+        boolean isUnique = command.isUnique(); 
+        
+        if (!tables.containsKey(tableName)) {
+            return TableDto.forError("Table '" + tableName + "' does not exist");
+        }
+        
+        Table table = tables.get(tableName);
+        
+        Schema schema = table.getSchema();
+        int columnIndex = schema.getColumnIndex(columnName);
+        if (columnIndex == -1) {
+            return TableDto.forError("Column '" + columnName + "' does not exist in table '" + tableName + "'");
+        }
+        
+        try {
+            DataType columnType = schema.getColumn(columnIndex).getType();
+            Index<?> newIndex = table.createTypedIndex(columnName, tableName, indexName, isUnique, columnType);    
+            return TableDto.forIndexResult(newIndex.getColumnName());
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return TableDto.forError("Error creating index: " + e.getMessage());
+        }
+    }
+
     private TableDto executeSelect(QueryData queryData)
     {
         String tableName = queryData.getTable();
@@ -90,11 +141,13 @@ public class QueryEngineImpl implements QueryEngine {
         }
 
         try {
-            List<Record> records = new ArrayList<>();
-            for (Record record: table) {
-                records.add(record);
-            }
-            List<Record> filteredRows = applyWhereFilter(selectedSchema, records, queryData.getPredicate());        
+            List<Record> records = getRecordsOptimized(table, queryData.getPredicate());
+            List<Record> filteredRows;
+            if (!records.isEmpty()) {
+                filteredRows = records;
+            } else {
+                filteredRows = applyWhereFilter(selectedSchema, records, queryData.getPredicate());
+            }  
             List<Integer> columnIndexes = new ArrayList<>();
             
             for (String columnName: selectedColumns) {
@@ -121,6 +174,65 @@ public class QueryEngineImpl implements QueryEngine {
     }
     }
     
+    private List<Record> getRecordsOptimized(Table table, DBPredicate predicate) {
+        try {
+            if (predicate != null && predicate.getTerms().size() == 1) {
+                DBTerm term = predicate.getTerms().get(0);
+                
+                // Check if it's an equality comparison (= operator)
+                if (term.getOperator() == 0) {
+                    String columnName = term.getLhsField();
+                    
+                    // Get the actual value from the constant, not the string representation
+                    Object valueObj = term.getRhsConstant().getVal();
+                    if (valueObj == null) {
+                        return new ArrayList<>();
+                    }
+                    
+                    // Try to find an index on this column
+                    Index<?> index = table.findIndexForColumn(columnName);
+                    if (index != null && index.isUnique()) {
+                        // We have a unique index we can use!
+                        
+                        Comparable searchValue = (Comparable) valueObj;
+                        
+                        RecordId rid = searchInIndex(index, searchValue);
+                        if (rid != null) {
+                            // Found a matching record - get it from the table
+                            Record record = table.getRecord(rid);
+                            return record != null ? Arrays.asList(record) : new ArrayList<>();
+                        }
+                        return new ArrayList<>(); // No match found
+                    }
+                }
+            }
+            
+            // Fallback to full table scan if no index can be used
+            List<Record> records = new ArrayList<>();
+            for (Record record : table) {
+                records.add(record);
+            }
+            return records;
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Fallback to table scan on error
+            List<Record> records = new ArrayList<>();
+            for (Record record : table) {
+                records.add(record);
+            }
+            return records;
+        }
+    }
+
+    /**
+     * Helper method for type-safe index searching
+     */
+    @SuppressWarnings("unchecked")
+    private <K extends Comparable<K>> RecordId searchInIndex(Index<?> index, Comparable value) {
+        // Safe cast because we know K extends Comparable<K>
+        return ((Index<K>) index).search((K) value);
+    }
+
     private List<Record> applyWhereFilter(Schema selectedSchema, List<Record> rows, DBPredicate predicate) {
 
         if (predicate == null || predicate.getTerms() == null || predicate.getTerms().isEmpty()) {

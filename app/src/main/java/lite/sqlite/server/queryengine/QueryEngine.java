@@ -9,6 +9,7 @@ public interface QueryEngine {
     
     TableDto doQuery(String sql);
     TableDto doUpdate(String sql);
+    TableDto doCreateIndex(String sql);
     default void close() {
     }
 }
