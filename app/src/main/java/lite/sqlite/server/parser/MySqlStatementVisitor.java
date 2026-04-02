@@ -1,6 +1,8 @@
 package lite.sqlite.server.parser;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementBaseVisitor;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
 
@@ -16,7 +18,6 @@ import lite.sqlite.server.model.domain.commands.DeleteData;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
 import lite.sqlite.server.model.domain.commands.UpdateData;
-import lite.sqlite.server.storage.record.Schema;
 
 public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
@@ -29,6 +30,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     
     //Select
     private List<String> selectedFields;
+    private boolean selectAll;
 
     //Insert
     private List<DBConstant> insertedVals;
@@ -44,12 +46,17 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
     private SchemaPresentation tableDTO;
 
+    /**
+     * Creates a statement visitor that captures parsed command metadata.
+     *
+     * @param parser generated MySQL parser instance
+     */
     public MySqlStatementVisitor(MySQLStatementParser parser) {
         this.parser = parser;
-
         this.tableName = "";
         this.pred = new DBPredicate();
         this.selectedFields = new ArrayList<>();
+        this.selectAll = false;
         this.indexName = "";
         this.indexFieldName = "";
         this.insertFields = new ArrayList<>();
@@ -59,6 +66,12 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     }
 
     // Command Type Visitors
+    /**
+     * Handles CREATE INDEX statements and extracts index metadata.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitCreateIndex(MySQLStatementParser.CreateIndexContext ctx) {
         commandType = CommandType.CREATE_INDEX;
@@ -77,6 +90,12 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitCreateIndex(ctx);
     }
 
+    /**
+     * Handles CREATE TABLE statements and captures table name.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitCreateTable(MySQLStatementParser.CreateTableContext ctx) {
         // System.out.println("DEBUG: visitCreateTable called");
@@ -93,12 +112,24 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     }
 
 
+    /**
+     * Marks command type as DELETE.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitDelete(MySQLStatementParser.DeleteContext ctx) {
         commandType = CommandType.DELETE;
         return super.visitDelete(ctx);
     }
 
+    /**
+     * Handles INSERT statements and extracts explicit column list.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitInsert(MySQLStatementParser.InsertContext ctx) {
         commandType = CommandType.INSERT;
@@ -125,27 +156,73 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitInsert(ctx);
     }
 
+    /**
+     * Marks command type as UPDATE/MODIFY.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitUpdate(MySQLStatementParser.UpdateContext ctx) {
         commandType = CommandType.MODIFY;
         return super.visitUpdate(ctx);
     }
 
+    /**
+     * Handles SELECT statements and resets projection state.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitSelect(MySQLStatementParser.SelectContext ctx) {
         commandType = CommandType.QUERY;
         selectedFields.clear();
+        selectAll = false;
         return super.visitSelect(ctx);
     }
 
+    /**
+     * Captures shorthand projection list usage (SELECT *) while still traversing
+     * child projection nodes for mixed projection lists.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
+    @Override
+    public Object visitProjections(MySQLStatementParser.ProjectionsContext ctx) {
+        if (ctx.unqualifiedShorthand() != null) {
+            this.selectAll = true;
+        }
+        return super.visitProjections(ctx);
+    }
+
+    /**
+     * Captures table name encountered in statement context.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitTableName(MySQLStatementParser.TableNameContext ctx) {
         this.tableName = ctx.name().getText();
         return super.visitTableName(ctx);
     }
 
+    /**
+     * Captures one projection expression from a SELECT list.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitProjection(MySQLStatementParser.ProjectionContext ctx) {        
+
+        if (ctx.qualifiedShorthand() != null) {
+            this.selectAll = true;
+            return super.visitProjection(ctx);
+        }
+
         if (ctx.expr() != null) {
             // System.out.println(ctx.expr());
             this.selectedFields.add(ctx.expr().getText());
@@ -153,6 +230,12 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitProjection(ctx);
     }
 
+    /**
+     * Captures column names used in INSERT statements.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitColumnName(MySQLStatementParser.ColumnNameContext ctx) {
         if (commandType == CommandType.INSERT && ctx.getText() != null) {
@@ -162,18 +245,32 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitColumnName(ctx);
     }
 
+    /**
+     * Captures literal assignment values for INSERT statements.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitAssignmentValues(MySQLStatementParser.AssignmentValuesContext ctx) {
         if (ctx.assignmentValue() != null) {
             for (var assignmentValue : ctx.assignmentValue()) {
-                if (assignmentValue.expr() != null) {
-                    this.insertedVals.add(new DBConstant(assignmentValue.expr().getText()));
+                String value = assignmentValue.expr().getText();
+                if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
+                    value = value.substring(1, value.length() - 1);
                 }
+                this.insertedVals.add(new DBConstant(value));
             }
         }
         return super.visitAssignmentValues(ctx);
     }
 
+    /**
+     * Parses a simple WHERE clause into a single predicate term.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitWhereClause(MySQLStatementParser.WhereClauseContext ctx) {
         String clause = ctx.getText();
@@ -239,6 +336,12 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitWhereClause(ctx);
     }
 
+    /**
+     * Captures index name token.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitIndexName(MySQLStatementParser.IndexNameContext ctx) {
         if (ctx.getText() != null) {
@@ -247,21 +350,29 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitIndexName(ctx);
     }
 
+    /**
+     * Parses one column definition and adds it to the CREATE TABLE schema presentation.
+     *
+     * @param ctx parser context
+     * @return delegated visitor result
+     */
     @Override
     public Object visitColumnDefinition(MySQLStatementParser.ColumnDefinitionContext ctx) {
         if (ctx.getText() != null) {
             System.out.println("Visit column:" + ctx.getText());
-            String text = ctx.getText();
-            
+            String text = ctx.getText().trim();
+
             String fieldName = null;
             String fieldType = null;
-            
-            for (int i = 1; i < text.length(); i++) {
-                if (Character.isUpperCase(text.charAt(i))) {
-                    fieldName = text.substring(0, i);
-                    fieldType = text.substring(i);
-                    break;
-                }
+
+            Pattern compactColumnPattern = Pattern.compile(
+                "^([a-zA-Z_][a-zA-Z0-9_]*)(varchar\\(\\d+\\)|integer|int)$",
+                Pattern.CASE_INSENSITIVE
+            );
+            Matcher matcher = compactColumnPattern.matcher(text);
+            if (matcher.matches()) {
+                fieldName = matcher.group(1);
+                fieldType = matcher.group(2);
             }
             
             if (fieldName != null && fieldType != null) {
@@ -274,54 +385,114 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         return super.visitColumnDefinition(ctx);
     }
 
+    /**
+     * Returns detected command type.
+     *
+     * @return command type
+     */
     public CommandType getCommandType() {
         return commandType;
     }
 
+    /**
+     * Returns parsed table name.
+     *
+     * @return table name
+     */
     public String getTableName() {
         return tableName;
     }
 
+    /**
+     * Returns parsed SELECT field list.
+     *
+     * @return projected fields
+     */
     public List<String> getSelectedFields() {
         return selectedFields;
     }
 
+    /**
+     * Returns parsed predicate.
+     *
+     * @return predicate
+     */
     public DBPredicate getPredicate() {
         return pred;
     }
 
+    /**
+     * Returns parsed INSERT values.
+     *
+     * @return constant values
+     */
     public List<DBConstant> getInsertedValues() {
         return insertedVals;
     }
 
+    /**
+     * Returns parsed INSERT field names.
+     *
+     * @return field names
+     */
     public List<String> getInsertFields() {
         return insertFields;
     }
 
+    /**
+     * Returns parsed index name.
+     *
+     * @return index name
+     */
     public String getIndexName() {
         return indexName;
     }
 
+    /**
+     * Returns parsed index field name.
+     *
+     * @return index field name
+     */
     public String getIndexFieldName() {
         return indexFieldName;
     }
 
+    /**
+     * Returns parsed CREATE TABLE schema presentation.
+     *
+     * @return schema DTO
+     */
     public SchemaPresentation getTableDTO() {
         return tableDTO;
     }
 
+    /**
+     * Returns parsed UPDATE field name.
+     *
+     * @return field name
+     */
     public String getUpdatedFieldName() {
         return updatedFieldName;
     }
 
+    /**
+     * Returns parsed UPDATE value expression.
+     *
+     * @return update expression
+     */
     public DBExpression getUpdatedFieldValue() {
         return updatedFieldValue;
     }
     
+    /**
+     * Materializes parsed state into a command DTO based on command type.
+     *
+     * @return command object or null when command type is not recognized
+     */
     public Object getValue() {
         switch (commandType) {
             case QUERY:
-                return new QueryData(selectedFields, tableName, pred);
+                return new QueryData(selectedFields, tableName, pred, selectAll);
             case INSERT:
                 return new InsertData(insertFields, insertedVals, tableName);
             case MODIFY:

@@ -2,7 +2,6 @@ package lite.sqlite.server.storage.table;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -24,6 +23,13 @@ public class Table implements Iterable<Record> {
     private final BufferPool bufferPool;
     private List<Index<?>> indexes;  // Add this field
     
+    /**
+     * Creates a table wrapper bound to a schema, backing buffer pool, and table name.
+     *
+     * @param schema logical schema definition for records in this table
+     * @param bufferPool shared buffer pool used for page access
+     * @param tableName table name used to derive the underlying file name
+     */
     public Table(Schema schema, BufferPool bufferPool, String tableName) {
         this.tableName = tableName;
         this.bufferPool = bufferPool;
@@ -32,6 +38,17 @@ public class Table implements Iterable<Record> {
     }
     
     // Index management methods
+    /**
+     * Creates and populates a typed index for a specific column.
+     *
+     * @param columnName indexed column name
+     * @param tableName table name used by index metadata
+     * @param indexName index name
+     * @param isUnique true when duplicate keys are not allowed
+     * @param columnType schema type of the indexed column
+     * @return created index instance
+     * @throws IOException when index population reads fail
+     */
     public Index<?> createTypedIndex(String columnName, String tableName, String indexName, boolean isUnique, DataType columnType) throws IOException {
         // Check if index already exists
         for (Index<?> existingIndex : indexes) {
@@ -68,6 +85,12 @@ public class Table implements Iterable<Record> {
         return newIndex;
     }
     
+    /**
+     * Finds the first index registered for the given column.
+     *
+     * @param columnName column name to search
+     * @return matching index or null when no index exists
+     */
     public Index<?> findIndexForColumn(String columnName) {
         for (Index<?> index : indexes) {
             if (index.getColumnName().equals(columnName)) {
@@ -77,10 +100,22 @@ public class Table implements Iterable<Record> {
         return null;
     }
     
+    /**
+     * Returns a defensive copy of all indexes currently registered on this table.
+     *
+     * @return list of indexes
+     */
     public List<Index<?>> getIndexes() {
         return new ArrayList<>(indexes);
     }
     
+    /**
+     * Scans existing records and inserts eligible values into a newly created index.
+     *
+     * @param index target index to populate
+     * @param columnIndex schema column index used as key source
+     * @throws IOException when page access fails
+     */
     private void populateIndex(Index<?> index, int columnIndex) throws IOException {
         String filename = getFileName();
         int blockNum = 0;
@@ -117,11 +152,26 @@ public class Table implements Iterable<Record> {
         }
     }
     
+    /**
+     * Inserts a comparable key-value mapping into a typed index.
+     *
+     * @param index target index
+     * @param value comparable key value
+     * @param rid record identifier value
+     * @param <K> key type
+     */
     @SuppressWarnings("unchecked")
     private <K extends Comparable<K>> void updateIndexTyped(Index<?> index, Comparable value, RecordId rid) {
         ((Index<K>) index).insert((K) value, rid);
     }
     
+    /**
+     * Inserts a record into the table and updates all applicable indexes.
+     *
+     * @param record record to insert
+     * @return generated record id
+     * @throws IOException when page operations fail
+     */
     public RecordId insertRecord(Record record) throws IOException {
         String filename = this.getFileName();
         Block block = new Block(filename, 0); 
@@ -185,11 +235,26 @@ public class Table implements Iterable<Record> {
         }
     }
     
+    /**
+     * Performs a typed index lookup using a comparable key.
+     *
+     * @param index target index
+     * @param value search key
+     * @param <K> key type
+     * @return matching record id or null
+     */
     @SuppressWarnings("unchecked")
     private <K extends Comparable<K>> RecordId searchInIndexTyped(Index<?> index, Comparable value) {
         return ((Index<K>) index).search((K) value);
     }
     
+    /**
+     * Reads a record by record id.
+     *
+     * @param rid record identifier
+     * @return record instance or null when slot is empty
+     * @throws IOException when page operations fail
+     */
     public Record getRecord(RecordId rid) throws IOException {
         Block block = rid.getBlockId();
         Page page = bufferPool.pinBlock(block);
@@ -209,22 +274,47 @@ public class Table implements Iterable<Record> {
     }
     
     // Existing methods
+    /**
+     * Returns table schema.
+     *
+     * @return schema
+     */
     public Schema getSchema() {
         return schema;
     }
     
+    /**
+     * Returns logical table name.
+     *
+     * @return table name
+     */
     public String getTableName() {
         return tableName;
     }
     
+    /**
+     * Derives table file name from table name.
+     *
+     * @return physical file name
+     */
     private String getFileName() {
         return tableName + ".tbl";
     }
     
+    /**
+     * Hook for metadata updates after mutating operations.
+     *
+     * @throws IOException when metadata persistence fails
+     */
     private void touch() throws IOException {
         // Implementation for table metadata updates
     }
     
+    /**
+     * Creates an iterator over records in this table.
+     *
+     * @return table iterator
+     */
     @Override
     public Iterator<Record> iterator() {
         return new TableIterator();
@@ -236,10 +326,16 @@ public class Table implements Iterable<Record> {
         private int currentRecordIndex = 0;
         private boolean hasMoreBlocks = true;
         
+        /**
+         * Initializes iterator state and loads the first data block.
+         */
         public TableIterator() {
             loadNextBlock();
         }
         
+        /**
+         * Loads records from the next block into memory for iteration.
+         */
         private void loadNextBlock() {
             currentRecords.clear();
             currentRecordIndex = 0;
@@ -267,6 +363,11 @@ public class Table implements Iterable<Record> {
             }
         }
         
+        /**
+         * Indicates whether another record is available.
+         *
+         * @return true when a subsequent record exists
+         */
         @Override
         public boolean hasNext() {
             if (currentRecordIndex < currentRecords.size()) {
@@ -281,6 +382,12 @@ public class Table implements Iterable<Record> {
             return false;
         }
         
+        /**
+         * Returns the next record in scan order.
+         *
+         * @return next record
+         * @throws NoSuchElementException when no further records exist
+         */
         @Override
         public Record next() {
             if (!hasNext()) {

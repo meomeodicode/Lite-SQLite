@@ -26,6 +26,14 @@ public class RecordPage {
     private final Block blockId;       
     private final BufferPool bufferPool; 
     
+    /**
+     * Creates a record page view over a physical page and initializes page metadata when empty.
+     *
+     * @param page backing page bytes
+     * @param schema schema used for record serialization
+     * @param blockId physical block identifier
+     * @param bufferPool buffer pool used for dirty tracking
+     */
     public RecordPage(Page page, Schema schema, Block blockId, BufferPool bufferPool) {
         this.page = page;
         this.schema = schema;
@@ -38,6 +46,12 @@ public class RecordPage {
         }
     }
     
+    /**
+     * Inserts one logical record into the page.
+     *
+     * @param record logical record values
+     * @return true when insertion succeeds, false when insufficient space
+     */
     public boolean insert(Object[] record) {
         byte[] recordData = serializeRecord(record);
         int recordLength = recordData.length;
@@ -99,6 +113,11 @@ public class RecordPage {
         return false;
     }
 
+    /**
+     * Computes the proportion of deleted slots within the current slot directory.
+     *
+     * @return fragmentation ratio in the range [0, 1]
+     */
     private double getFragmentationRatio() {
         int total = getRecordCount();
         if (total == 0) return 0.0;
@@ -113,6 +132,13 @@ public class RecordPage {
         return 1.0 - ((double) active / total);
     }
         
+    /**
+     * Updates the record at a given slot, relocating it when needed.
+     *
+     * @param slot slot number
+     * @param record new record values
+     * @return true when update succeeds, false otherwise
+     */
     public boolean update(int slot, Object[] record) {
         if (slot < 0 || slot >= getRecordCount()) {
             return false; 
@@ -164,6 +190,12 @@ public class RecordPage {
         }
     }
   
+    /**
+     * Marks a slot as deleted and optionally compacts the page.
+     *
+     * @param slot slot number to delete
+     * @return true when delete succeeds, false for invalid slot
+     */
     public boolean delete(int slot) {
         int recordCount = getRecordCount();
         if (slot < 0 || slot >= recordCount) {
@@ -181,6 +213,12 @@ public class RecordPage {
         return true;
     }
     
+    /**
+     * Reads and deserializes a record by slot number.
+     *
+     * @param slot slot number
+     * @return record values or null when slot is empty/invalid
+     */
     public Object[] getRecord(int slot) {
         if (slot < 0 || slot >= getRecordCount()) {
             return null;
@@ -200,6 +238,11 @@ public class RecordPage {
         return deserializeRecord(recordData);
     }
     
+    /**
+     * Returns all non-deleted records together with their slot metadata.
+     *
+     * @return list of record-with-slot wrappers
+     */
     public List<RecordWithSlot> getAllRecords() {
         List<RecordWithSlot> result = new ArrayList<>();
         int recordCount = getRecordCount();
@@ -219,6 +262,12 @@ public class RecordPage {
         return result;
     }
     
+    /**
+     * Checks whether the page currently has sufficient contiguous free space.
+     *
+     * @param size required bytes
+     * @return true when enough space is available
+     */
     public boolean hasSpace(int size) {
         int freeSpaceStart = DIRECTORY_OFFSET + HEADER_SIZE + (getRecordCount() * SLOT_SIZE);
         int freeSpaceEnd = getFreeSpacePointer();
@@ -233,18 +282,38 @@ public class RecordPage {
         return size <= availableSpace;
     }
     
+    /**
+     * Returns the number of slots tracked in the directory.
+     *
+     * @return record count
+     */
     public int getRecordCount() {
         return page.getInt(RECORD_COUNT_OFFSET);
     }
     
+    /**
+     * Persists record count in page header.
+     *
+     * @param count new slot count
+     */
     private void setRecordCount(int count) {
         page.setInt(RECORD_COUNT_OFFSET, count);
     }
  
+    /**
+     * Reads free-space pointer from page header.
+     *
+     * @return free-space pointer offset
+     */
     private int getFreeSpacePointer() {
         return page.getInt(FREE_POINTER_OFFSET);
     }
     
+    /**
+     * Writes free-space pointer in page header.
+     *
+     * @param pointer new pointer value
+     */
     private void setFreeSpacePointer(int pointer) {
         if (pointer < DIRECTORY_OFFSET + HEADER_SIZE || pointer > Page.PAGE_SIZE) {
             throw new IllegalArgumentException("Invalid free space pointer: " + pointer);
@@ -252,12 +321,21 @@ public class RecordPage {
         page.setInt(FREE_POINTER_OFFSET, pointer);
     }
     
+    /**
+     * Marks the owning block as dirty in the buffer pool.
+     */
     private void markDirty() {
         if (bufferPool != null && blockId != null) {
             bufferPool.markDirtyBlock(blockId);
         }
     }
     
+    /**
+     * Serializes logical record values to binary form based on schema.
+     *
+     * @param record logical record values
+     * @return encoded bytes
+     */
     private byte[] serializeRecord(Object[] record) {
         int estimatedSize = calculateRecordSize(record);
         int maxRecordSize = Page.PAGE_SIZE - HEADER_SIZE - SLOT_SIZE - 100; // Leave some margin
@@ -297,6 +375,12 @@ public class RecordPage {
         return result;
     }
 
+    /**
+     * Deserializes binary record bytes into schema-aligned values.
+     *
+     * @param data encoded record bytes
+     * @return decoded logical record values
+     */
     private Object[] deserializeRecord(byte[] data) {
 
         ByteBuffer buffer = ByteBuffer.wrap(data);
@@ -323,6 +407,12 @@ public class RecordPage {
         return record;
     }
     
+    /**
+     * Estimates encoded record size according to schema and current values.
+     *
+     * @param record logical record values
+     * @return estimated encoded size in bytes
+     */
     private int calculateRecordSize(Object[] record) {
         int size = 0;
         
@@ -346,6 +436,9 @@ public class RecordPage {
         return size;
     }
 
+    /**
+     * Compacts live records to reclaim fragmented free space.
+     */
     private void compactPage() {
         int recordCount = getRecordCount();
         if (recordCount == 0) return;
@@ -397,6 +490,11 @@ public class RecordPage {
         markDirty(); 
     }
 
+    /**
+     * Determines whether deletion fragmentation has crossed the compaction threshold.
+     *
+     * @return true when compaction is recommended
+     */
     private boolean shouldCompact() {
         int total = getRecordCount();
         if (total <= 2) return false;
@@ -417,30 +515,60 @@ public class RecordPage {
         private int slot;
         private Block block;  // Add this!
         
+        /**
+         * Creates a tuple of record data with physical location metadata.
+         *
+         * @param record logical values
+         * @param slot slot number
+         * @param block owning block
+         */
         public RecordWithSlot(Object[] record, int slot, Block block) {
             this.record = record;
             this.slot = slot;
             this.block = block;
         }
         
+        /**
+         * Returns record values.
+         *
+         * @return logical values
+         */
         public Object[] getRecord() {
             return record;
         }
         
+        /**
+         * Returns slot number.
+         *
+         * @return slot number
+         */
         public int getSlot() {
             return slot;
         }
         
+        /**
+         * Returns owning block.
+         *
+         * @return block id
+         */
         public Block getBlock() {
             return block;
         }
         
+        /**
+         * Converts this wrapper to a stable record identifier.
+         *
+         * @return record id
+         */
         public RecordId toRecordId() {
             return new RecordId(block, slot);
         }
 
     }
 
+    /**
+     * Prints a coarse visualization of page layout and occupancy statistics.
+     */
     public void visualizePage() {
     int pageSize = Page.PAGE_SIZE;
     int directorySpace = HEADER_SIZE + (getRecordCount() * SLOT_SIZE);

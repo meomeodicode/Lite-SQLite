@@ -3,8 +3,7 @@ package lite.sqlite.cli;
 import java.util.Scanner;
 
 import lite.sqlite.server.queryengine.QueryEngine;
-import lite.sqlite.server.queryengine.QueryEngineImpl;
-import lite.sqlite.cli.TableDto;;
+import lite.sqlite.cli.TableDto;
 
 /**
  * Console implementation of the CLI interface.
@@ -22,7 +21,7 @@ public class ConsoleCLI implements CLI {
      * @param queryEngine the query engine to use
      */
     public ConsoleCLI(QueryEngine queryEngine) {
-        this.queryEngine = new QueryEngineImpl();
+        this.queryEngine = queryEngine;
         this.tablePrinter = new TablePrinter();
     }
     
@@ -45,6 +44,7 @@ public class ConsoleCLI implements CLI {
         if (scanner != null) {
             scanner.close();
         }
+        queryEngine.close();
         System.out.println("Goodbye!");
     }
     
@@ -60,13 +60,16 @@ public class ConsoleCLI implements CLI {
             
             TableDto result;
             try {
-                if (sql.toLowerCase().startsWith("select")) {
+                String normalizedSql = sql.trim().toLowerCase();
+                if (normalizedSql.startsWith("select")) {
                     result = queryEngine.doQuery(sql);
+                } else if (normalizedSql.startsWith("create index")) {
+                    result = queryEngine.doCreateIndex(sql);
                 } else {
                     result = queryEngine.doUpdate(sql);
                 }
                 
-                if (result.getErrorMessage().isEmpty()) {
+                if (result.getErrorMessage() == null) {
                     tablePrinter.print(result);
                 } else {
                     System.out.println(result.getErrorMessage());

@@ -38,12 +38,21 @@ public class QueryEngineImpl implements QueryEngine {
     private final BufferPool bufferPool;
     private final BasicFileManager fileManager;
 
+    /**
+     * Creates a query engine backed by a local database directory and a fixed-size buffer pool.
+     */
     public QueryEngineImpl() {
         File dbDirectory = new File("database");
         this.fileManager = new BasicFileManager(dbDirectory);
         this.bufferPool = new BufferPool(50, fileManager);
     }
 
+    /**
+     * Executes a SQL query command (for example, SELECT) and returns tabular output.
+     *
+     * @param sql SQL query text
+     * @return query result table or an error table
+     */
     @Override
     public TableDto doQuery(String sql) {
         try {
@@ -60,6 +69,12 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    /**
+     * Executes a SQL update command (currently CREATE TABLE and INSERT).
+     *
+     * @param sql SQL update text
+     * @return update result table or an error table
+     */
     @Override
     public TableDto doUpdate(String sql) {
         try {
@@ -78,6 +93,12 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    /**
+     * Executes a SQL CREATE INDEX command.
+     *
+     * @param sql SQL index creation text
+     * @return index creation result table or an error table
+     */
     @Override
     public TableDto doCreateIndex(String sql) {
         try {
@@ -94,6 +115,12 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    /**
+     * Builds an index on a table column using command data produced by the parser.
+     *
+     * @param command parsed CREATE INDEX command data
+     * @return index creation result or an error table
+     */
     private TableDto executeCreateIndex(CreateIndexData command) {
         
         String columnName = command.getFieldname();
@@ -124,11 +151,26 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    /**
+     * Executes a SELECT command by collecting candidate records, applying predicates,
+     * projecting selected columns, and returning the final result table.
+     *
+     * @param queryData parsed query command
+     * @return result table containing selected columns and rows, or an error table
+     */
     private TableDto executeSelect(QueryData queryData)
     {
         String tableName = queryData.getTable();
         
         if (!tables.containsKey(tableName)) {
+        /**
+         * Retrieves candidate records for a predicate, attempting index lookup for simple
+         * equality predicates and falling back to full table scan when needed.
+         *
+         * @param table source table
+         * @param predicate optional query predicate
+         * @return candidate record list (possibly empty)
+         */
             return TableDto.forError("Table" + tableName + "doesn't exist");
         }
 
@@ -136,20 +178,22 @@ public class QueryEngineImpl implements QueryEngine {
         Schema selectedSchema = table.getSchema();
         List<String> selectedColumns = queryData.getFields();
 
+        if (Boolean.TRUE.equals(queryData.getSelectAll())) {
+            selectedColumns = selectedSchema.getColumnNames();
+        }
+
         if  (selectedColumns.isEmpty()) {
             return TableDto.forError("Table" + tableName + "has no fields");
         }
 
         try {
-            List<Record> records = getRecordsOptimized(table, queryData.getPredicate());
-            List<Record> filteredRows;
-            if (!records.isEmpty()) {
-                filteredRows = records;
-            } else {
-                filteredRows = applyWhereFilter(selectedSchema, records, queryData.getPredicate());
-            }  
+            //search candidates index
+            List<Record> candidateRecords = getCandidateRecords(table, queryData.getPredicate());
+
+            //filter the candidates 
+             List<Record> filteredRows = (candidateRecords.isEmpty())?candidateRecords:applyWhereFilter(selectedSchema, candidateRecords, queryData.getPredicate());
             List<Integer> columnIndexes = new ArrayList<>();
-            
+        
             for (String columnName: selectedColumns) {
                 int columnIdx = selectedSchema.getColumnIndex(columnName);
                 columnIndexes.add(columnIdx);
@@ -174,31 +218,29 @@ public class QueryEngineImpl implements QueryEngine {
     }
     }
     
-    private List<Record> getRecordsOptimized(Table table, DBPredicate predicate) {
+    private List<Record> getCandidateRecords(Table table, DBPredicate predicate) {
+        
         try {
             if (predicate != null && predicate.getTerms().size() == 1) {
                 DBTerm term = predicate.getTerms().get(0);
                 
-                // Check if it's an equality comparison (= operator)
                 if (term.getOperator() == 0) {
+
+                    // Get all terms and prepare for search
                     String columnName = term.getLhsField();
-                    
-                    // Get the actual value from the constant, not the string representation
+                    Index<?> index = table.findIndexForColumn(columnName);
                     Object valueObj = term.getRhsConstant().getVal();
+                    
                     if (valueObj == null) {
-                        return new ArrayList<>();
+                        throw new IllegalArgumentException("Null value after equality");
                     }
                     
-                    // Try to find an index on this column
-                    Index<?> index = table.findIndexForColumn(columnName);
                     if (index != null && index.isUnique()) {
-                        // We have a unique index we can use!
-                        
+
                         Comparable searchValue = (Comparable) valueObj;
-                        
                         RecordId rid = searchInIndex(index, searchValue);
                         if (rid != null) {
-                            // Found a matching record - get it from the table
+                        
                             Record record = table.getRecord(rid);
                             return record != null ? Arrays.asList(record) : new ArrayList<>();
                         }
@@ -206,14 +248,14 @@ public class QueryEngineImpl implements QueryEngine {
                     }
                 }
             }
-            
             // Fallback to full table scan if no index can be used
             List<Record> records = new ArrayList<>();
             for (Record record : table) {
                 records.add(record);
             }
             return records;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             e.printStackTrace();
             // Fallback to table scan on error
             List<Record> records = new ArrayList<>();
@@ -233,6 +275,14 @@ public class QueryEngineImpl implements QueryEngine {
         return ((Index<K>) index).search((K) value);
     }
 
+    /**
+     * Applies WHERE predicate terms to a list of records.
+     *
+     * @param selectedSchema schema used to resolve field names in predicate terms
+     * @param rows input rows to filter
+     * @param predicate optional WHERE predicate
+     * @return filtered rows; returns input rows unchanged when predicate is empty
+     */
     private List<Record> applyWhereFilter(Schema selectedSchema, List<Record> rows, DBPredicate predicate) {
 
         if (predicate == null || predicate.getTerms() == null || predicate.getTerms().isEmpty()) {
@@ -258,6 +308,12 @@ public class QueryEngineImpl implements QueryEngine {
         return filteredRows;
     }
 
+    /**
+     * Creates a new in-memory table with the provided schema definition.
+     *
+     * @param createData parsed CREATE TABLE command data
+     * @return update result table or an error table
+     */
     private TableDto executeCreateTable(CreateTableData createData) {
         String tableName = createData.getTableName();
         
@@ -266,23 +322,12 @@ public class QueryEngineImpl implements QueryEngine {
         }
         
         try {
-            System.out.println("DEBUG: Creating table " + tableName);
-            System.out.println("DEBUG: Schema fields: " + 
-                createData.getSchemaPresentation().getFieldNames());
-            System.out.println("DEBUG: Schema types: " + 
-                createData.getSchemaPresentation().getFieldTypes());
-            
             Schema newSchema = createData.getSchemaPresentation().convertToSchema();
-            System.out.println("DEBUG: Converted to storage schema successfully");
-            
-            // Print detailed info about the schema
-            System.out.println("DEBUG: Storage schema columns: " + newSchema.getColumnNames());
-            
             Table newTable = new Table(newSchema, bufferPool, tableName);
-            System.out.println("DEBUG: Created Table object successfully");
-        
-        tables.put(tableName, newTable);
-        System.out.println("DEBUG: Table registered in engine");
+            fileManager.initializePhysicalTable(newTable);
+            
+            tables.put(tableName, newTable);
+            System.out.println("DEBUG: Table registered in engine");
         
         return TableDto.forUpdateResult(0);
     } catch (Exception e) {
@@ -292,6 +337,13 @@ public class QueryEngineImpl implements QueryEngine {
     }
 }
 
+    /**
+     * Inserts one record into a target table after validating fields and converting
+     * values to schema-compatible types.
+     *
+     * @param insertData parsed INSERT command data
+     * @return update result table or an error table
+     */
     private TableDto executeInsert(InsertData insertData) {
         String tableName = insertData.getTableName();
         
@@ -341,27 +393,62 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    /**
+     * Converts a parsed constant into the expected storage type defined by schema.
+     *
+     * @param constant parsed constant value
+     * @param targetType target schema type
+     * @return converted Java value compatible with the target type
+     */
     private Object convertValueToSchemaType(DBConstant constant, DataType targetType) {
         if (constant == null) {
             return null;
         }
 
+        Object rawValue = constant.asJavaVal();
+        if (rawValue == null) {
+            return null;
+        }
+
         switch (targetType) {
             case INTEGER:
-                if (constant.asInt() != null) {
-                    return constant.asInt();
-                }
-                try {
-                    return Integer.parseInt(constant.asString());
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("Invalid integer value: " + constant.asString());
-                }
+                return convertToInteger(rawValue);
             
             case VARCHAR:
-                return constant.asString();
+                return normalizeSqlLiteralString(rawValue.toString());
             
             default:
-                return constant.toString();
+                throw new IllegalArgumentException("Unsupported target type: " + targetType);
         }
+    }
+
+    private Integer convertToInteger(Object rawValue) {
+        if (rawValue instanceof Integer) {
+            return (Integer) rawValue;
+        }
+
+        if (rawValue instanceof Number) {
+            return ((Number) rawValue).intValue();
+        }
+
+        String normalized = normalizeSqlLiteralString(rawValue.toString());
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("Invalid integer value: empty input");
+        }
+
+        try {
+            return Integer.parseInt(normalized);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid integer value: " + rawValue);
+        }
+    }
+
+    private String normalizeSqlLiteralString(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.length() >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+            String inner = trimmed.substring(1, trimmed.length() - 1);
+            return inner.replace("''", "'");
+        }
+        return trimmed;
     }
 }

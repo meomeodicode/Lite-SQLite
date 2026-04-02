@@ -70,3 +70,18 @@ task testQueryEngine(type: Test) {
         showStandardStreams = true
     }
 }
+
+tasks.register('runCli', JavaExec) {
+    group = 'application'
+    description = 'Run interactive Lite SQLite CLI'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.App'
+    standardInput = System.in
+}
+
+tasks.register('runManual', JavaExec) {
+    group = 'application'
+    description = 'Run scripted manual debug workflow'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.cli.ManualDebugRunner'
+}

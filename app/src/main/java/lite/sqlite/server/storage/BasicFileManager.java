@@ -3,18 +3,28 @@ package lite.sqlite.server.storage;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.file.Files;
 import java.util.concurrent.ConcurrentHashMap;
+
+import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.filemanager.FileManager;
+import lite.sqlite.server.storage.table.Table;
 
 public class BasicFileManager implements FileManager {
 
     private final File dbDir;
-    private final ConcurrentHashMap<String, RandomAccessFile> openFiles;
+    private ConcurrentHashMap<String, RandomAccessFile> openFiles;
+    private final BufferPool bufferPool;
 
     public BasicFileManager(File dbDirectory) {
+        this(dbDirectory, null);
+    }
+
+    public BasicFileManager(File dbDirectory, BufferPool bufferPool) {
         this.dbDir = dbDirectory;
         this.openFiles = new ConcurrentHashMap<>();
-        
+        this.bufferPool = bufferPool;
+
         if (!dbDirectory.exists()) {
             dbDirectory.mkdirs();
         }
@@ -91,6 +101,22 @@ public class BasicFileManager implements FileManager {
         } catch (IOException e) {
             throw new RuntimeException("Cannot get file size for " + fileName, e);
         }
+    }
+
+    public File initializePhysicalTable(Table table) throws IOException {
+        
+        String fileName = table.getTableName() + ".tbl";
+        File tableFile = new File(dbDir, fileName);
+        if (!tableFile.exists()) {
+            Files.createFile(tableFile.toPath());
+        }
+
+        Block block0 = append(fileName);
+        if (bufferPool != null) {
+            Page page = bufferPool.pinBlock(block0);
+            bufferPool.unpinBlock(block0);
+        }
+        return tableFile;
     }
 
     @Override

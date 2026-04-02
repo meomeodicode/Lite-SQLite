@@ -1,7 +1,8 @@
 # Ignore Gradle project-specific cache directory
 .gradle
 .tbl
-
+database/
+app/database
 # Ignore Gradle build output directory
 build
 

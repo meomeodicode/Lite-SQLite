@@ -3,24 +3,15 @@ import java.util.List;
 
 import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.ToString;
 
 @ToString
 @AllArgsConstructor
+@Data
 public class QueryData {
     private List<String> fields;
     private String table;
-    private DBPredicate pred;
-    
-    public List<String> getFields() {
-        return fields;
-    }
-    
-    public String getTable() {
-        return table;
-    }
-    
-    public DBPredicate getPredicate() {
-        return pred;
-    }
+    private DBPredicate predicate;
+    private Boolean selectAll;
 }

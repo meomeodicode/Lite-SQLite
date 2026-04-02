@@ -53,10 +53,8 @@ public class DBTerm {
             return false;
         }
         
-
         Object constValue = rhsConst.asJavaVal();
         
-
         boolean isIntegerComparison = (constValue instanceof Integer);
         
         try {
