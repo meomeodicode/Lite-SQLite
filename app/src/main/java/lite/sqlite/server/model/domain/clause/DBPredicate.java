@@ -29,7 +29,7 @@ public class DBPredicate {
         // You can extend this to parse the expression into proper DBTerms
         if (expression != null && !expression.trim().isEmpty()) {
             // Simple implementation - you can enhance this later
-            this.add(new DBTerm("temp_field", DBTerm.EQUALS, new DBConstant(expression)));
+            this.add(new DBTerm("temp_field", ComparisonOperator.EQUALS, new DBConstant(expression)));
         }
     }
 

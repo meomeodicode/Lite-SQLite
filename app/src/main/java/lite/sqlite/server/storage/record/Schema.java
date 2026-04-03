@@ -38,7 +38,6 @@ public class Schema {
                 return i;
             }
         }
-        System.out.printf("Can't find", name);
         return -1;
     }
     

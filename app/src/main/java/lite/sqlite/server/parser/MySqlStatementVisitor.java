@@ -7,6 +7,7 @@ import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementBaseVisitor;
 import org.apache.shardingsphere.sql.parser.autogen.MySQLStatementParser;
 
 import lite.sqlite.server.model.SchemaPresentation;
+import lite.sqlite.server.model.domain.clause.ComparisonOperator;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBExpression;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
@@ -81,10 +82,8 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         
         if (openParen >= 0 && closeParen > openParen) {
             this.indexFieldName = fullText.substring(openParen + 1, closeParen);
-            System.out.println("DEBUG: Extracted index column name: " + this.indexFieldName);
         } else {
             this.indexFieldName = "";
-            System.out.println("WARNING: Could not extract index column name from: " + fullText);
         }
         
         return super.visitCreateIndex(ctx);
@@ -98,15 +97,11 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
      */
     @Override
     public Object visitCreateTable(MySQLStatementParser.CreateTableContext ctx) {
-        // System.out.println("DEBUG: visitCreateTable called");
-        // System.out.println("DEBUG: Context text: " + ctx.getText());
-        
         this.commandType = CommandType.CREATE_TABLE;
         
         // Extract table name
         if (ctx.tableName() != null) {
             this.tableName = ctx.tableName().getText();
-            System.out.println("DEBUG: Found table name: " + this.tableName);
         }
         return super.visitCreateTable(ctx);
     }
@@ -148,7 +143,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
                 String cleanColumn = column.trim();
                 if (!cleanColumn.isEmpty()) {
                     insertFields.add(cleanColumn);
-                    System.out.println("DEBUG: Added field: " + cleanColumn);
                 }
             }
         }
@@ -224,7 +218,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         }
 
         if (ctx.expr() != null) {
-            // System.out.println(ctx.expr());
             this.selectedFields.add(ctx.expr().getText());
         }
         return super.visitProjection(ctx);
@@ -239,7 +232,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitColumnName(MySQLStatementParser.ColumnNameContext ctx) {
         if (commandType == CommandType.INSERT && ctx.getText() != null) {
-            System.out.println("column names:" + ctx.getText());
             this.insertFields.add(ctx.getText());
         }
         return super.visitColumnName(ctx);
@@ -274,7 +266,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitWhereClause(MySQLStatementParser.WhereClauseContext ctx) {
         String clause = ctx.getText();
-        System.out.println("DEBUG: Parsing WHERE clause: " + clause);
         
         String expression = clause;
         if (expression.toUpperCase().startsWith("WHERE")) {
@@ -282,14 +273,14 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
         }
         
         String lhsField = null;
-        int operatorCode = -1;
+        ComparisonOperator operator = null;
         Object rhsValue = null;
         
         if (expression.contains("=")) {
             String[] parts = expression.split("=", 2);
             lhsField = parts[0].trim();
             String valueStr = parts[1].trim();
-            operatorCode = 0; // EQUALS
+            operator = ComparisonOperator.EQUALS;
             
             if (valueStr.startsWith("'") && valueStr.endsWith("'")) {
                 rhsValue = valueStr.substring(1, valueStr.length() - 1);
@@ -304,7 +295,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             String[] parts = expression.split(">", 2);
             lhsField = parts[0].trim();
             String valueStr = parts[1].trim();
-            operatorCode = 1; 
+            operator = ComparisonOperator.GREATER_THAN;
             
             try {
                 rhsValue = Integer.parseInt(valueStr);
@@ -315,7 +306,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             String[] parts = expression.split("<", 2);
             lhsField = parts[0].trim();
             String valueStr = parts[1].trim();
-            operatorCode = 2; 
+            operator = ComparisonOperator.LESS_THAN;
             
             try {
                 rhsValue = Integer.parseInt(valueStr);
@@ -324,12 +315,9 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             }
         }
         
-        if (lhsField != null && operatorCode >= 0 && rhsValue != null) {
-            System.out.println("DEBUG: Parsed WHERE: field=" + lhsField + 
-                            ", op=" + operatorCode + ", value=" + rhsValue);
-            this.pred = new DBPredicate(new DBTerm(lhsField, operatorCode, new DBConstant(rhsValue)));
+        if (lhsField != null && operator != null && rhsValue != null) {
+            this.pred = new DBPredicate(new DBTerm(lhsField, operator, new DBConstant(rhsValue)));
         } else {
-            System.err.println("WARNING: Could not parse WHERE clause: " + expression);
             this.pred = new DBPredicate(); 
         }
         
@@ -359,7 +347,6 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitColumnDefinition(MySQLStatementParser.ColumnDefinitionContext ctx) {
         if (ctx.getText() != null) {
-            System.out.println("Visit column:" + ctx.getText());
             String text = ctx.getText().trim();
 
             String fieldName = null;
@@ -376,10 +363,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             }
             
             if (fieldName != null && fieldType != null) {
-                System.out.println("DEBUG: Parsed field: " + fieldName + " type: " + fieldType);
                 this.tableDTO.addField(fieldName, fieldType);
-            } else {
-                System.out.println("DEBUG: Could not parse: " + text);
             }
         }
         return super.visitColumnDefinition(ctx);

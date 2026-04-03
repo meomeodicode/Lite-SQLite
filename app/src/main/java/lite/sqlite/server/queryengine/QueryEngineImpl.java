@@ -6,12 +6,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
-
-import org.checkerframework.checker.units.qual.K;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.server.Parser;
+import lite.sqlite.server.model.domain.clause.ComparisonOperator;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lite.sqlite.server.model.domain.clause.DBTerm;
@@ -29,7 +27,7 @@ import lite.sqlite.server.storage.table.RecordId;
 import lite.sqlite.server.storage.table.Table;
 import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
-import lite.sqlite.server.storage.record.Schema;;
+import lite.sqlite.server.storage.record.Schema;
 
 
 public class QueryEngineImpl implements QueryEngine {
@@ -163,14 +161,6 @@ public class QueryEngineImpl implements QueryEngine {
         String tableName = queryData.getTable();
         
         if (!tables.containsKey(tableName)) {
-        /**
-         * Retrieves candidate records for a predicate, attempting index lookup for simple
-         * equality predicates and falling back to full table scan when needed.
-         *
-         * @param table source table
-         * @param predicate optional query predicate
-         * @return candidate record list (possibly empty)
-         */
             return TableDto.forError("Table" + tableName + "doesn't exist");
         }
 
@@ -217,14 +207,22 @@ public class QueryEngineImpl implements QueryEngine {
         return TableDto.forError("Error executing SELECT: " + e.getMessage());
     }
     }
-    
+
+    /**
+     * Retrieves candidate records for a predicate, attempting index lookup for simple
+     * equality predicates and falling back to full table scan when needed.
+     *
+     * @param table source table
+     * @param predicate optional query predicate
+     * @return candidate record list (possibly empty)
+     */
     private List<Record> getCandidateRecords(Table table, DBPredicate predicate) {
         
         try {
             if (predicate != null && predicate.getTerms().size() == 1) {
                 DBTerm term = predicate.getTerms().get(0);
                 
-                if (term.getOperator() == 0) {
+                if (term.getOperator() == ComparisonOperator.EQUALS) {
 
                     // Get all terms and prepare for search
                     String columnName = term.getLhsField();
@@ -323,11 +321,10 @@ public class QueryEngineImpl implements QueryEngine {
         
         try {
             Schema newSchema = createData.getSchemaPresentation().convertToSchema();
-            Table newTable = new Table(newSchema, bufferPool, tableName);
+            Table newTable = new Table(newSchema, bufferPool, tableName, fileManager);
             fileManager.initializePhysicalTable(newTable);
             
             tables.put(tableName, newTable);
-            System.out.println("DEBUG: Table registered in engine");
         
         return TableDto.forUpdateResult(0);
     } catch (Exception e) {
@@ -358,7 +355,6 @@ public class QueryEngineImpl implements QueryEngine {
         List<DBConstant> insertValues = insertData.getValues();
         
         try {
-            System.out.println("DEBUG: Insert - Creating record data array");
             Object[] recordData = new Object[schemaFields.size()];
             
             for (int i = 0; i < insertFields.size(); i++) {
@@ -371,20 +367,14 @@ public class QueryEngineImpl implements QueryEngine {
                 
                 DBConstant value = insertValues.get(i);
                 Object convertedValue = convertValueToSchemaType(value, schema.getColumn(schemaIndex).getType());
-
-                System.out.println("DEBUG: Setting " + fieldName + "=" + convertedValue + 
-                    " at index " + schemaIndex);
                 recordData[schemaIndex] = convertedValue;
             }
             
             Record record = new Record(recordData);
-            System.out.println("DEBUG: Created record: " + Arrays.toString(recordData));
             
-            RecordId recordId = table.insertRecord(record);
-            System.out.println("DEBUG: Record inserted with ID: " + recordId);
+            table.insertRecord(record);
             
             bufferPool.flushAll();
-            System.out.println("DEBUG: Flushed buffer pool");
             
             return TableDto.forUpdateResult(1);
         } catch (Exception e) {

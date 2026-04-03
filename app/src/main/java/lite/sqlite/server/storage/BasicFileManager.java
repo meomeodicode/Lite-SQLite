@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.filemanager.FileManager;
+import lite.sqlite.server.storage.record.SlottedRecordPage;
 import lite.sqlite.server.storage.table.Table;
 
 public class BasicFileManager implements FileManager {
@@ -113,10 +114,20 @@ public class BasicFileManager implements FileManager {
 
         Block block0 = append(fileName);
         if (bufferPool != null) {
-            Page page = bufferPool.pinBlock(block0);
+            bufferPool.pinBlock(block0);
             bufferPool.unpinBlock(block0);
         }
         return tableFile;
+    }
+
+    @Override
+    public int searchForEmptyBlock(String filename) {
+        try {
+            // Return the next append position when no table/schema context is provided.
+            return getBlockCount(filename);
+        } catch (IOException e) {
+            return -1;
+        }
     }
 
     @Override
@@ -125,6 +136,41 @@ public class BasicFileManager implements FileManager {
             file.close();
         }
         openFiles.clear();
+    }
+
+    @Override
+    public Block searchForInsertableBlock(Table table, Object[] recordValues) {
+        if (table == null) {
+            throw new IllegalArgumentException("table must not be null");
+        }
+        if (recordValues == null) {
+            throw new IllegalArgumentException("recordValues must not be null");
+        }
+
+        String filename = table.getTableName() + ".tbl";
+        int blockCount;
+        try {
+            blockCount = getBlockCount(filename);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot get block count for file: " + filename, e);
+        }
+
+        for (int i = 0; i < blockCount; i++) {
+            Block block = new Block(filename, i);
+            Page page = new Page();
+            try {
+                read(block, page);
+                SlottedRecordPage wrapperRecordPage =
+                    new SlottedRecordPage(page, table.getSchema(), block, null);
+                if (wrapperRecordPage.checkSufficientRecordSpace(recordValues)) {
+                    return block;
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Cannot inspect block while searching insertable block: " + block, e);
+            }
+        }
+
+        return null;
     }
 
     private RandomAccessFile getFile(String filename) throws IOException {

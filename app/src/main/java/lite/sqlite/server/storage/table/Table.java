@@ -1,5 +1,6 @@
 package lite.sqlite.server.storage.table;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -9,11 +10,12 @@ import java.util.NoSuchElementException;
 import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
+import lite.sqlite.server.storage.filemanager.FileManager;
 import lite.sqlite.server.storage.index.Index;
 import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
-import lite.sqlite.server.storage.record.RecordPage;
-import lite.sqlite.server.storage.record.RecordPage.RecordWithSlot;
+import lite.sqlite.server.storage.record.SlottedRecordPage;
+import lite.sqlite.server.storage.record.SlottedRecordPage.RecordWithSlot;
 import lite.sqlite.server.storage.record.Schema;
 
 public class Table implements Iterable<Record> {
@@ -21,6 +23,7 @@ public class Table implements Iterable<Record> {
     private final String tableName;
     private final Schema schema;
     private final BufferPool bufferPool;
+    private final FileManager fileManager;
     private List<Index<?>> indexes;  // Add this field
     
     /**
@@ -30,11 +33,12 @@ public class Table implements Iterable<Record> {
      * @param bufferPool shared buffer pool used for page access
      * @param tableName table name used to derive the underlying file name
      */
-    public Table(Schema schema, BufferPool bufferPool, String tableName) {
+    public Table(Schema schema, BufferPool bufferPool, String tableName, FileManager fileManager) {
+        this.fileManager = fileManager;
         this.tableName = tableName;
         this.bufferPool = bufferPool;
         this.schema = schema;
-        this.indexes = new ArrayList<>();  // Initialize here
+        this.indexes = new ArrayList<>(); 
     }
     
     // Index management methods
@@ -126,7 +130,7 @@ public class Table implements Iterable<Record> {
                 Page page = bufferPool.pinBlock(block);
                 
                 try {
-                    RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
                     
                     for (RecordWithSlot rws : recordPage.getAllRecords()) {
                         Object[] values = rws.getRecord();
@@ -173,11 +177,13 @@ public class Table implements Iterable<Record> {
      * @throws IOException when page operations fail
      */
     public RecordId insertRecord(Record record) throws IOException {
-        String filename = this.getFileName();
-        Block block = new Block(filename, 0); 
-        Page page = bufferPool.pinBlock(block);
+        Block block = fileManager.searchForInsertableBlock(this, record.getValues());
+        if (block == null) {
+            block = fileManager.append(getFileName());
+        }
 
-        RecordPage recordPage = new RecordPage(page, getSchema(), block, bufferPool);
+        Page page = bufferPool.pinBlock(block);
+        SlottedRecordPage recordPage = new SlottedRecordPage(page, getSchema(), block, bufferPool);
         
         try {
             if (!indexes.isEmpty()) {
@@ -260,7 +266,7 @@ public class Table implements Iterable<Record> {
         Page page = bufferPool.pinBlock(block);
         
         try {
-            RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+            SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
             Object[] values = recordPage.getRecord(rid.getSlotNumber());
             
             if (values == null) {
@@ -348,7 +354,7 @@ public class Table implements Iterable<Record> {
                 Page page = bufferPool.pinBlock(block);
                 
                 try {
-                    RecordPage recordPage = new RecordPage(page, schema, block, bufferPool);
+                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
                     currentRecords = recordPage.getAllRecords();
                     currentBlockNum++;
                 } finally {

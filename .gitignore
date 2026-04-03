@@ -7,3 +7,6 @@ app/database
 build
 
 bin/
+
+# Tracking files
+BUGS.md

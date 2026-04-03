@@ -1,4 +1,4 @@
-package lite.sqlite.server.storage;
+package lite.sqlite.server.demo;
 
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.cli.TablePrinter;

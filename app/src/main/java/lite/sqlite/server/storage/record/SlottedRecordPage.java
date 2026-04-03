@@ -9,7 +9,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-public class RecordPage {
+public class SlottedRecordPage {
     private static final int HEADER_SIZE = 32;   
     private static final int SLOT_SIZE = 8;       
     
@@ -34,7 +34,7 @@ public class RecordPage {
      * @param blockId physical block identifier
      * @param bufferPool buffer pool used for dirty tracking
      */
-    public RecordPage(Page page, Schema schema, Block blockId, BufferPool bufferPool) {
+    public SlottedRecordPage(Page page, Schema schema, Block blockId, BufferPool bufferPool) {
         this.page = page;
         this.schema = schema;
         this.blockId = blockId;
@@ -55,19 +55,13 @@ public class RecordPage {
     public boolean insert(Object[] record) {
         byte[] recordData = serializeRecord(record);
         int recordLength = recordData.length;
-        int requiredSpace = recordLength + SLOT_SIZE; 
-        
-        System.out.println("DEBUG: Inserting record of length: " + recordLength);
-        System.out.println("DEBUG: Free space pointer: " + getFreeSpacePointer());
-        System.out.println("DEBUG: Directory end: " + (DIRECTORY_OFFSET + HEADER_SIZE + (getRecordCount() * SLOT_SIZE)));
-        
-        if (hasSpace(requiredSpace)) {        
+
+        if (checkSufficientRecordSpace(recordLength)) {
             int freePointer = getFreeSpacePointer();
             int newFreePointer = freePointer - recordLength;
             int recordOffset = newFreePointer;
             
             if (recordOffset < DIRECTORY_OFFSET + HEADER_SIZE + ((getRecordCount() + 1) * SLOT_SIZE)) {
-                System.out.println("ERROR: Record would overlap with directory!");
                 return false;
             }
             
@@ -84,30 +78,36 @@ public class RecordPage {
             markDirty(); 
             return true;
         }
-        
-        else if (getFragmentationRatio() > 0.2) {
-            compactPage();
-            
-            if (!hasSpace(requiredSpace)) {
-                return false;
-            }
-            
-            int freePointer = getFreeSpacePointer();
-            int newFreePointer = freePointer - recordLength;
-            int recordOffset = newFreePointer;
-            
-            page.write(recordOffset, recordData);
-            setFreeSpacePointer(newFreePointer);
-            
-            int recordCount = getRecordCount();
-            int slotOffset = DIRECTORY_OFFSET + HEADER_SIZE + (recordCount * SLOT_SIZE);
-            
-            page.setInt(slotOffset + SLOT_OFFSET, recordOffset);
-            page.setInt(slotOffset + SLOT_LENGTH, recordLength);
-            
-            setRecordCount(recordCount + 1);
-            markDirty(); 
+
+        return false;
+    }
+
+    /**
+     * Checks if this page can fit the provided logical record values.
+     *
+     * @param record logical record values
+     * @return true when insert would have enough space (after optional compaction), false otherwise
+     */
+    public boolean checkSufficientRecordSpace(Object[] record) {
+        int recordLength = serializeRecord(record).length;
+        return checkSufficientRecordSpace(recordLength);
+    }
+
+    /**
+     * Checks whether this page can fit a record payload of the given byte length.
+     *
+     * @param recordLength serialized record length in bytes
+     * @return true when enough space exists (including slot metadata), false otherwise
+     */
+    private boolean checkSufficientRecordSpace(int recordLength) {
+        int requiredSpace = recordLength + SLOT_SIZE;
+        if (hasSpace(requiredSpace)) {
             return true;
+        }
+
+        if (getFragmentationRatio() > 0.2) {
+            compactPage();
+            return hasSpace(requiredSpace);
         }
 
         return false;
@@ -272,13 +272,7 @@ public class RecordPage {
         int freeSpaceStart = DIRECTORY_OFFSET + HEADER_SIZE + (getRecordCount() * SLOT_SIZE);
         int freeSpaceEnd = getFreeSpacePointer();
         int availableSpace = freeSpaceEnd - freeSpaceStart;
-        
-        System.out.println("DEBUG hasSpace:");
-        System.out.println("  requiredSpace: " + size);
-        System.out.println("  freeSpaceStart: " + freeSpaceStart);  
-        System.out.println("  freeSpaceEnd: " + freeSpaceEnd);
-        System.out.println("  availableSpace: " + availableSpace);
-        
+
         return size <= availableSpace;
     }
     
@@ -370,8 +364,7 @@ public class RecordPage {
         byte[] result = new byte[buffer.position()];
         buffer.rewind();
         buffer.get(result);
-        
-        System.out.println("DEBUG: Serialized record size: " + result.length);
+
         return result;
     }
 

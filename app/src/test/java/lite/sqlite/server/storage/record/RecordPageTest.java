@@ -17,7 +17,7 @@ public class RecordPageTest {
     private Page page;
     private Block blockId;
     private BufferPool bufferPool;
-    private RecordPage recordPage;
+    private SlottedRecordPage recordPage;
     
     @BeforeEach
     public void setUp() {
@@ -36,7 +36,7 @@ public class RecordPageTest {
         bufferPool = mock(BufferPool.class);
         
         // Create RecordPage
-        recordPage = new RecordPage(page, schema, blockId, bufferPool);
+        recordPage = new SlottedRecordPage(page, schema, blockId, bufferPool);
     }
     
     @Test
@@ -76,7 +76,7 @@ public class RecordPageTest {
         assertEquals(3, recordPage.getRecord(2)[0]);
         
         // Verify getAllRecords
-        List<RecordPage.RecordWithSlot> allRecords = recordPage.getAllRecords();
+        List<SlottedRecordPage.RecordWithSlot> allRecords = recordPage.getAllRecords();
         assertEquals(3, allRecords.size(), "Should have 3 records");
     }
     

@@ -14,4 +14,6 @@ public interface FileManager {
     Block append(String fileName) throws IOException;
     int getBlockCount(String fileName) throws IOException;
     void close() throws IOException; 
+    int searchForEmptyBlock(String filename);
+    Block searchForInsertableBlock(Table table, Object[] recordValues);
 }

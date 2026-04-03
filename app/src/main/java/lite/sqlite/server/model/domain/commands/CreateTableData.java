@@ -1,7 +1,5 @@
 package lite.sqlite.server.model.domain.commands;
 
-import javax.xml.validation.Schema;
-
 import lite.sqlite.server.model.SchemaPresentation;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
