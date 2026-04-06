@@ -6,6 +6,8 @@ import lite.sqlite.server.scan.RORecordScan;
  * Represents a term in a database query predicate.
  * A term is a comparison between a field and a constant value,
  * or between two fields.
+ * 
+ * Currently only support for constant rhs
  */
 public class DBTerm {
     private String lhsField;       
@@ -40,66 +42,55 @@ public class DBTerm {
     }
     
     public boolean isSatisfied(RORecordScan s) {
-        if (!s.hasField(lhsField)) {
-            return false;
-        }
 
-        if (rhsField != null) {
-            return false;
+        if (rhsField != null || rhsConst == null || lhsField == null || !s.hasField(lhsField)) {
+            return false; 
         }
         
         Object constValue = rhsConst.asJavaVal();
         
-        boolean isIntegerComparison = (constValue instanceof Integer);
-        
-        try {
-            // Perform type-specific comparison
-            if (isIntegerComparison) {
-                // Get the field as an integer
-                Integer fieldValue = s.getInt(lhsField);
-                if (fieldValue == null) {
-                    return false;
-                }
-                
-                // Compare integers
-                Integer constInt = (Integer)constValue;
-                switch (operator) {
-                    case EQUALS:
-                        return fieldValue.equals(constInt);
-                    case GREATER_THAN:
-                        return fieldValue.compareTo(constInt) > 0;
-                    case LESS_THAN:
-                        return fieldValue.compareTo(constInt) < 0;
-                    default: return false;
-                }
-            } else {
-                // Assume string comparison
-                String fieldValue = s.getString(lhsField);
-                if (fieldValue == null) {
-                    return false;
-                }
-                
-                // Convert constant to string for comparison
-                String constStr = constValue.toString();
-                if (constValue instanceof String) {
-                    // If it's already a string, use it directly (don't add extra quotes from toString)
-                    constStr = (String)constValue;
-                }
-                
-                switch (operator) {
-                    case EQUALS:
-                        return fieldValue.equals(constStr);
-                    case GREATER_THAN:
-                        return fieldValue.compareTo(constStr) > 0;
-                    case LESS_THAN:
-                        return fieldValue.compareTo(constStr) < 0;
-                    case LIKE:
-                        return fieldValue.toLowerCase().contains(constStr.toLowerCase());
-                    default: return false;
-                }
-            }
-        } catch (Exception e) {
+        if (constValue == null) {
             return false;
+        }
+
+        Object fieldValue = extractFieldValue(s, constValue);
+        if (fieldValue == null) {
+            return false;
+        }
+
+        return evaluateComparison(fieldValue, constValue);
+    }
+
+    private Object extractFieldValue(RORecordScan s, Object constValue) {
+        if (constValue instanceof Integer) {
+            return s.getInt(lhsField);
+        }
+        return s.getString(lhsField);
+    }
+
+    private boolean evaluateComparison(Object fieldValue, Object constValue) {
+        if (fieldValue instanceof Integer && constValue instanceof Integer) {
+            return compareComparable((Integer) fieldValue, (Integer) constValue);
+        }
+
+        String left = fieldValue.toString();
+        String right = constValue.toString();
+        if (operator == ComparisonOperator.LIKE) {
+            return left.toLowerCase().contains(right.toLowerCase());
+        }
+        return compareComparable(left, right);
+    }
+
+    private <T extends Comparable<T>> boolean compareComparable(T left, T right) {
+        switch (operator) {
+            case EQUALS:
+                return left.compareTo(right) == 0;
+            case GREATER_THAN:
+                return left.compareTo(right) > 0;
+            case LESS_THAN:
+                return left.compareTo(right) < 0;
+            default:
+                return false;
         }
     }
     /**
