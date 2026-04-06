@@ -13,5 +13,5 @@ public class CreateIndexData {
     private String idxname; 
     private String tblname;
     private String fieldname;
-    private boolean isUnique = true; 
+    private boolean isUnique = false; 
 }

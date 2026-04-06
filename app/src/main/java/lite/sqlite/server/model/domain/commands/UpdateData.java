@@ -1,6 +1,7 @@
 package lite.sqlite.server.model.domain.commands;
 import java.util.List;
 
+import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -11,6 +12,7 @@ import lombok.ToString;
 @AllArgsConstructor
 public class UpdateData {
     private List<String> fields;
+    private List<DBConstant> values;
     private DBPredicate predicate;
     private String tblName;
     

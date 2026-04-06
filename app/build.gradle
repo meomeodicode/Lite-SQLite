@@ -85,3 +85,15 @@ tasks.register('runManual', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'lite.sqlite.cli.ManualDebugRunner'
 }
+
+tasks.register('runBenchmark', JavaExec) {
+    group = 'application'
+    description = 'Run index performance benchmark and print console metrics'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.benchmark.IndexBenchmarkRunner'
+    args(
+        (project.findProperty('rows') ?: '20000').toString(),
+        (project.findProperty('warmup') ?: '50').toString(),
+        (project.findProperty('iterations') ?: '200').toString()
+    )
+}

@@ -24,7 +24,9 @@ public class TableDto {
     }
 
     public TableDto(String columnName, String message) {
-        this(columnName);
+        this.columnNames = List.of(columnName);
+        this.rowValues = List.of(List.of(message));
+        this.errorMessage = null;
     }
     
     public static TableDto forError(String errorMessage) {

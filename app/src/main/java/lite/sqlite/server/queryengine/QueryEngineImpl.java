@@ -1,6 +1,7 @@
 package lite.sqlite.server.queryengine;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -15,19 +16,25 @@ import lite.sqlite.server.model.domain.clause.DBPredicate;
 import lite.sqlite.server.model.domain.clause.DBTerm;
 import lite.sqlite.server.model.domain.commands.CreateIndexData;
 import lite.sqlite.server.model.domain.commands.CreateTableData;
+import lite.sqlite.server.model.domain.commands.DeleteData;
 import lite.sqlite.server.model.domain.commands.InsertData;
 import lite.sqlite.server.model.domain.commands.QueryData;
+import lite.sqlite.server.model.domain.commands.UpdateData;
 import lite.sqlite.server.parser.ParserImpl;
 import lite.sqlite.server.scan.RORecordScan;
 import lite.sqlite.server.scan.RORecordScanImpl;
+import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.BasicFileManager;
+import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
-import lite.sqlite.server.storage.index.Index;
+import lite.sqlite.server.storage.index.TableIndex;
 import lite.sqlite.server.storage.table.RecordId;
 import lite.sqlite.server.storage.table.Table;
 import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
 import lite.sqlite.server.storage.record.Schema;
+import lite.sqlite.server.storage.record.SlottedRecordPage;
+import lite.sqlite.server.storage.record.SlottedRecordPage.RecordWithSlot;
 
 
 public class QueryEngineImpl implements QueryEngine {
@@ -40,7 +47,15 @@ public class QueryEngineImpl implements QueryEngine {
      * Creates a query engine backed by a local database directory and a fixed-size buffer pool.
      */
     public QueryEngineImpl() {
-        File dbDirectory = new File("database");
+        this(new File("database"));
+    }
+
+    /**
+     * Creates a query engine backed by the provided database directory and a fixed-size buffer pool.
+     *
+     * @param dbDirectory directory where table files are stored
+     */
+    public QueryEngineImpl(File dbDirectory) {
         this.fileManager = new BasicFileManager(dbDirectory);
         this.bufferPool = new BufferPool(50, fileManager);
     }
@@ -68,7 +83,7 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     /**
-     * Executes a SQL update command (currently CREATE TABLE and INSERT).
+     * Executes a SQL update command (CREATE TABLE, INSERT, UPDATE, DELETE).
      *
      * @param sql SQL update text
      * @return update result table or an error table
@@ -83,6 +98,10 @@ public class QueryEngineImpl implements QueryEngine {
                 return executeCreateTable((CreateTableData) command);
             } else if (command instanceof InsertData) {
                 return executeInsert((InsertData) command);
+            } else if (command instanceof UpdateData) {
+                return executeUpdate((UpdateData) command);
+            } else if (command instanceof DeleteData) {
+                return executeDelete((DeleteData) command);
             } else {
                 return TableDto.forError("Unknown update command");
             }
@@ -140,7 +159,7 @@ public class QueryEngineImpl implements QueryEngine {
         
         try {
             DataType columnType = schema.getColumn(columnIndex).getType();
-            Index<?> newIndex = table.createTypedIndex(columnName, tableName, indexName, isUnique, columnType);    
+            TableIndex<?> newIndex = table.createTypedIndex(columnName, tableName, indexName, isUnique, columnType);    
             return TableDto.forIndexResult(newIndex.getColumnName());
             
         } catch (Exception e) {
@@ -226,23 +245,38 @@ public class QueryEngineImpl implements QueryEngine {
 
                     // Get all terms and prepare for search
                     String columnName = term.getLhsField();
-                    Index<?> index = table.findIndexForColumn(columnName);
+                    TableIndex<?> index = table.findIndexForColumn(columnName);
                     Object valueObj = term.getRhsConstant().getVal();
                     
                     if (valueObj == null) {
                         throw new IllegalArgumentException("Null value after equality");
                     }
                     
-                    if (index != null && index.isUnique()) {
+                    if (index != null) {
 
                         Comparable searchValue = (Comparable) valueObj;
-                        RecordId rid = searchInIndex(index, searchValue);
-                        if (rid != null) {
-                        
-                            Record record = table.getRecord(rid);
-                            return record != null ? Arrays.asList(record) : new ArrayList<>();
+                        if (index.isUnique()) {
+                            RecordId rid = searchInIndex(index, searchValue);
+                            if (rid != null) {
+                            
+                                Record record = table.getRecord(rid);
+                                return record != null ? Arrays.asList(record) : new ArrayList<>();
+                            }
+                            return new ArrayList<>(); // No match found
                         }
-                        return new ArrayList<>(); // No match found
+
+                        List<RecordId> rids = searchAllInIndex(index, searchValue);
+                        if (!rids.isEmpty()) {
+                            List<Record> indexedRecords = new ArrayList<>();
+                            for (RecordId rid : rids) {
+                                Record record = table.getRecord(rid);
+                                if (record != null) {
+                                    indexedRecords.add(record);
+                                }
+                            }
+                            return indexedRecords;
+                        }
+                        return new ArrayList<>();
                     }
                 }
             }
@@ -268,9 +302,22 @@ public class QueryEngineImpl implements QueryEngine {
      * Helper method for type-safe index searching
      */
     @SuppressWarnings("unchecked")
-    private <K extends Comparable<K>> RecordId searchInIndex(Index<?> index, Comparable value) {
+    private <K extends Comparable<K>> RecordId searchInIndex(TableIndex<?> index, Comparable value) {
         // Safe cast because we know K extends Comparable<K>
-        return ((Index<K>) index).search((K) value);
+        return ((TableIndex<K>) index).search((K) value);
+    }
+
+    /**
+     * Helper method for type-safe non-unique index search.
+     *
+     * @param index target index
+     * @param value lookup key
+     * @param <K> key type
+     * @return all matching record ids, possibly empty
+     */
+    @SuppressWarnings("unchecked")
+    private <K extends Comparable<K>> List<RecordId> searchAllInIndex(TableIndex<?> index, Comparable value) {
+        return ((TableIndex<K>) index).searchAll((K) value);
     }
 
     /**
@@ -304,6 +351,23 @@ public class QueryEngineImpl implements QueryEngine {
             }
         }
         return filteredRows;
+    }
+
+    /**
+     * Evaluates a predicate against a single record, defaulting to true when no
+     * predicate terms are supplied.
+     *
+     * @param schema record schema
+     * @param record record to evaluate
+     * @param predicate predicate to apply
+     * @return true when record satisfies predicate (or predicate is empty)
+     */
+    private boolean matchesPredicate(Schema schema, Record record, DBPredicate predicate) {
+        if (predicate == null || predicate.getTerms() == null || predicate.getTerms().isEmpty()) {
+            return true;
+        }
+        RORecordScan recordScan = new RORecordScanImpl(record, schema);
+        return predicate.isSatisfied(recordScan);
     }
 
     /**
@@ -384,6 +448,146 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     /**
+     * Updates records that satisfy the command predicate.
+     *
+     * @param updateData parsed UPDATE command data
+     * @return update result table or an error table
+     */
+    private TableDto executeUpdate(UpdateData updateData) {
+        String tableName = updateData.getTableName();
+        if (!tables.containsKey(tableName)) {
+            return TableDto.forError("Table '" + tableName + "' does not exist");
+        }
+
+        List<String> fields = updateData.getFields();
+        List<DBConstant> values = updateData.getValues();
+        if (fields == null || values == null || fields.isEmpty()) {
+            return TableDto.forError("UPDATE requires at least one field assignment");
+        }
+
+        if (fields.size() != values.size()) {
+            return TableDto.forError("UPDATE field/value assignment count does not match");
+        }
+
+        Table table = tables.get(tableName);
+        Schema schema = table.getSchema();
+        List<Integer> columnIndexes = new ArrayList<>();
+
+        try {
+            for (String field : fields) {
+                int columnIndex = schema.getColumnIndex(field);
+                if (columnIndex == -1) {
+                    return TableDto.forError("Column '" + field + "' does not exist");
+                }
+                columnIndexes.add(columnIndex);
+            }
+
+            int affectedRows = 0;
+            String filename = table.getTableName() + ".tbl";
+            int blockCount = fileManager.getBlockCount(filename);
+
+            for (int blockNum = 0; blockNum < blockCount; blockNum++) {
+                Block block = new Block(filename, blockNum);
+                Page page = bufferPool.pinBlock(block);
+
+                try {
+                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
+                    List<RecordWithSlot> records = recordPage.getAllRecords();
+
+                    for (RecordWithSlot recordWithSlot : records) {
+                        Object[] currentValues = recordWithSlot.getRecord();
+                        Record currentRecord = new Record(currentValues);
+
+                        if (!matchesPredicate(schema, currentRecord, updateData.getPredicate())) {
+                            continue;
+                        }
+
+                        Object[] updatedValues = Arrays.copyOf(currentValues, currentValues.length);
+                        for (int i = 0; i < columnIndexes.size(); i++) {
+                            int columnIndex = columnIndexes.get(i);
+                            DataType targetType = schema.getColumn(columnIndex).getType();
+                            updatedValues[columnIndex] = convertValueToSchemaType(values.get(i), targetType);
+                        }
+
+                        if (!recordPage.update(recordWithSlot.getSlot(), updatedValues)) {
+                            return TableDto.forError(
+                                "Unable to update record at block " + blockNum + ", slot " + recordWithSlot.getSlot()
+                            );
+                        }
+
+                        affectedRows++;
+                    }
+                } finally {
+                    bufferPool.unpinBlock(block);
+                }
+            }
+
+            table.rebuildIndexes();
+            bufferPool.flushAll();
+            return TableDto.forUpdateResult(affectedRows);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return TableDto.forError("Error updating records: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Deletes records that satisfy the command predicate.
+     *
+     * @param deleteData parsed DELETE command data
+     * @return update result table or an error table
+     */
+    private TableDto executeDelete(DeleteData deleteData) {
+        String tableName = deleteData.getTableName();
+        if (!tables.containsKey(tableName)) {
+            return TableDto.forError("Table '" + tableName + "' does not exist");
+        }
+
+        Table table = tables.get(tableName);
+        Schema schema = table.getSchema();
+        DBPredicate predicate = null;
+        if (deleteData.getPredicate() != null && !deleteData.getPredicate().isEmpty()) {
+            predicate = deleteData.getPredicate().get(0);
+        }
+
+        try {
+            int affectedRows = 0;
+            String filename = table.getTableName() + ".tbl";
+            int blockCount = fileManager.getBlockCount(filename);
+
+            for (int blockNum = 0; blockNum < blockCount; blockNum++) {
+                Block block = new Block(filename, blockNum);
+                Page page = bufferPool.pinBlock(block);
+
+                try {
+                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
+                    List<RecordWithSlot> records = recordPage.getAllRecords();
+
+                    for (RecordWithSlot recordWithSlot : records) {
+                        Record currentRecord = new Record(recordWithSlot.getRecord());
+                        if (!matchesPredicate(schema, currentRecord, predicate)) {
+                            continue;
+                        }
+
+                        if (recordPage.delete(recordWithSlot.getSlot())) {
+                            affectedRows++;
+                        }
+                    }
+                } finally {
+                    bufferPool.unpinBlock(block);
+                }
+            }
+
+            table.rebuildIndexes();
+            bufferPool.flushAll();
+            return TableDto.forUpdateResult(affectedRows);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return TableDto.forError("Error deleting records: " + e.getMessage());
+        }
+    }
+
+    /**
      * Converts a parsed constant into the expected storage type defined by schema.
      *
      * @param constant parsed constant value
@@ -440,5 +644,15 @@ public class QueryEngineImpl implements QueryEngine {
             return inner.replace("''", "'");
         }
         return trimmed;
+    }
+
+    @Override
+    public void close() {
+        try {
+            bufferPool.flushAll();
+            fileManager.close();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to close query engine resources", e);
+        }
     }
 }

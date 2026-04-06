@@ -57,8 +57,8 @@ public class TestCLI {
         
         tree.printTree();
         
-        System.out.println("\nSearch 1: " + tree.search(1));
-        System.out.println("Search 3: " + tree.search(3));
+        System.out.println("\nSearch 1: " + tree.searchUniqueIndex(1));
+        System.out.println("Search 3: " + tree.searchUniqueIndex(3));
     }
     
     private static void testBasicFunctionality() {

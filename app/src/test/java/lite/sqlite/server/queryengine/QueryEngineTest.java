@@ -13,7 +13,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,45 +24,22 @@ import static org.junit.jupiter.api.Assertions.*;
 public class QueryEngineTest {
 
     private QueryEngineImpl queryEngine;
+    private File testDbDirectory;
+
+    @TempDir
+    Path tempDir;
     
     @BeforeEach
     void setUp() {
-        // Create database directory if it doesn't exist
-        File dbDirectory = new File("database");
-        if (!dbDirectory.exists()) {
-            dbDirectory.mkdirs();
-        }
-        
-        // Initialize query engine
-        queryEngine = new QueryEngineImpl();
+        testDbDirectory = tempDir.resolve("database").toFile();
+        queryEngine = new QueryEngineImpl(testDbDirectory);
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        // Close resources
         if (queryEngine != null) {
             queryEngine.close();
         }
-        
-        // Clean up test files
-        File dbDirectory = new File("database");
-        if (dbDirectory.exists()) {
-            deleteDirectory(dbDirectory);
-        }
-    }
-
-    private void deleteDirectory(File directory) {
-        File[] allContents = directory.listFiles();
-        if (allContents != null) {
-            for (File file : allContents) {
-                if (file.isDirectory()) {
-                    deleteDirectory(file);
-                } else {
-                    file.delete();
-                }
-            }
-        }
-        directory.delete();
     }
 
     @Nested
@@ -81,7 +57,7 @@ public class QueryEngineTest {
             assertNull(result.getErrorMessage(), "Error message should be null on success");
             
             // And: Table file should be created on disk
-            File tableFile = new File("database/users.tbl");
+            File tableFile = new File(testDbDirectory, "users.tbl");
             assertTrue(tableFile.exists(), "Table file 'users.tbl' should be created.");
         }
         
@@ -287,6 +263,80 @@ public class QueryEngineTest {
             assertTrue(result.getErrorMessage().contains("doesn't exist") || 
                        result.getErrorMessage().contains("not exist"), 
                        "Error message should indicate table not found");
+        }
+    }
+
+    @Nested
+    @DisplayName("UPDATE/DELETE Tests")
+    class MutateTests {
+
+        @Test
+        @DisplayName("Should update rows matching WHERE clause")
+        void testUpdateWithWhereClause() {
+            queryEngine.doUpdate("CREATE TABLE accounts (id INTEGER, name VARCHAR(50), active INTEGER)");
+            queryEngine.doUpdate("INSERT INTO accounts (id, name, active) VALUES (1, 'Alice', 1)");
+            queryEngine.doUpdate("INSERT INTO accounts (id, name, active) VALUES (2, 'Bob', 0)");
+
+            TableDto updateResult =
+                queryEngine.doUpdate("UPDATE accounts SET name = 'Bobby', active = 1 WHERE id = 2");
+            assertNull(updateResult.getErrorMessage(), "UPDATE should succeed");
+            assertEquals("1 row(s) affected", updateResult.getRows().get(0).get(0));
+
+            TableDto checkResult = queryEngine.doQuery("SELECT name, active FROM accounts WHERE id = 2");
+            assertNull(checkResult.getErrorMessage(), "SELECT after UPDATE should succeed");
+            assertEquals(1, checkResult.getRows().size(), "Should return updated row");
+            assertEquals("Bobby", checkResult.getRows().get(0).get(0));
+            assertEquals("1", checkResult.getRows().get(0).get(1));
+        }
+
+        @Test
+        @DisplayName("Should delete rows matching WHERE clause")
+        void testDeleteWithWhereClause() {
+            queryEngine.doUpdate("CREATE TABLE logs (id INTEGER, status VARCHAR(20))");
+            queryEngine.doUpdate("INSERT INTO logs (id, status) VALUES (1, 'ok')");
+            queryEngine.doUpdate("INSERT INTO logs (id, status) VALUES (2, 'error')");
+            queryEngine.doUpdate("INSERT INTO logs (id, status) VALUES (3, 'error')");
+
+            TableDto deleteResult = queryEngine.doUpdate("DELETE FROM logs WHERE status = 'error'");
+            assertNull(deleteResult.getErrorMessage(), "DELETE should succeed");
+            assertEquals("2 row(s) affected", deleteResult.getRows().get(0).get(0));
+
+            TableDto checkResult = queryEngine.doQuery("SELECT id FROM logs");
+            assertNull(checkResult.getErrorMessage(), "SELECT after DELETE should succeed");
+            assertEquals(1, checkResult.getRows().size(), "Only one row should remain");
+            assertEquals("1", checkResult.getRows().get(0).get(0));
+        }
+    }
+
+    @Nested
+    @DisplayName("INDEX Tests")
+    class IndexTests {
+
+        @Test
+        @DisplayName("Should return all matching rows for non-unique indexed equality lookup")
+        void testNonUniqueIndexEqualityLookup() {
+            String tableName = "orders_" + System.nanoTime();
+            String indexName = "idx_" + tableName + "_status";
+
+            queryEngine.doUpdate("CREATE TABLE " + tableName + " (id INTEGER, status INTEGER)");
+            queryEngine.doUpdate("INSERT INTO " + tableName + " (id, status) VALUES (1, 1)");
+            queryEngine.doUpdate("INSERT INTO " + tableName + " (id, status) VALUES (2, 1)");
+            queryEngine.doUpdate("INSERT INTO " + tableName + " (id, status) VALUES (3, 2)");
+            queryEngine.doUpdate("INSERT INTO " + tableName + " (id, status) VALUES (4, 1)");
+
+            TableDto createIndexResult =
+                queryEngine.doCreateIndex("CREATE INDEX " + indexName + " ON " + tableName + "(status)");
+            assertNull(createIndexResult.getErrorMessage(), "CREATE INDEX should succeed");
+
+            TableDto result = queryEngine.doQuery("SELECT id FROM " + tableName + " WHERE status = 1");
+            assertNull(result.getErrorMessage(), "Indexed equality query should succeed");
+            assertEquals(3, result.getRows().size(), "status=1 should return 3 rows");
+
+            List<String> ids = result.getRows().stream().map(row -> row.get(0)).toList();
+            assertTrue(ids.contains("1"), "Should include id=1");
+            assertTrue(ids.contains("2"), "Should include id=2");
+            assertTrue(ids.contains("4"), "Should include id=4");
+            assertFalse(ids.contains("3"), "Should not include id=3");
         }
     }
     

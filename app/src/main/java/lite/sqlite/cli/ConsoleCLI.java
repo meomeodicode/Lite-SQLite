@@ -51,6 +51,12 @@ public class ConsoleCLI implements CLI {
     private void cliLoop() {
         while (running) {
             System.out.print("litesql> ");
+            if (!scanner.hasNext()) {
+                // Gracefully terminate when stdin is closed (e.g., non-interactive runs).
+                stop();
+                break;
+            }
+
             String sql = scanner.next().replace("\\n", " ").replace("\\r", "").trim();
             
             if (sql.equalsIgnoreCase("exit")) {

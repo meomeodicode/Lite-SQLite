@@ -22,7 +22,6 @@ import lite.sqlite.server.model.domain.commands.UpdateData;
 
 public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
 
-    private final MySQLStatementParser parser;
     private CommandType commandType;
     
     //Common
@@ -40,10 +39,13 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     //Update
     private DBExpression updatedFieldValue;
     private String updatedFieldName;
+    private List<String> updatedFieldNames;
+    private List<DBConstant> updatedFieldValues;
 
     // Index
     private String indexName;
     private String indexFieldName;
+    private boolean isUnique;
 
     private SchemaPresentation tableDTO;
 
@@ -53,16 +55,18 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
      * @param parser generated MySQL parser instance
      */
     public MySqlStatementVisitor(MySQLStatementParser parser) {
-        this.parser = parser;
         this.tableName = "";
         this.pred = new DBPredicate();
         this.selectedFields = new ArrayList<>();
         this.selectAll = false;
         this.indexName = "";
         this.indexFieldName = "";
+        this.isUnique = false;
         this.insertFields = new ArrayList<>();
         this.insertedVals = new ArrayList<>();
         this.updatedFieldName = "";
+        this.updatedFieldNames = new ArrayList<>();
+        this.updatedFieldValues = new ArrayList<>();
         this.tableDTO = new SchemaPresentation();
     }
 
@@ -76,16 +80,23 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitCreateIndex(MySQLStatementParser.CreateIndexContext ctx) {
         commandType = CommandType.CREATE_INDEX;
-        String fullText = ctx.getText();
-        int openParen = fullText.lastIndexOf('(');
-        int closeParen = fullText.lastIndexOf(')');
-        
-        if (openParen >= 0 && closeParen > openParen) {
-            this.indexFieldName = fullText.substring(openParen + 1, closeParen);
-        } else {
-            this.indexFieldName = "";
+
+        // Reset index state per statement to avoid leaking values across parses.
+        this.indexName = "";
+        this.indexFieldName = "";
+        this.isUnique = false;
+
+        if (ctx.indexName() != null) {
+            this.indexName = sanitizeIdentifier(ctx.indexName().getText());
         }
-        
+        if (ctx.tableName() != null) {
+            this.tableName = sanitizeIdentifier(ctx.tableName().getText());
+        }
+
+        String fullText = ctx.getText();
+        this.isUnique = parseUniqueFromCreateIndex(fullText);
+        this.indexFieldName = extractFirstIndexedColumn(fullText);
+
         return super.visitCreateIndex(ctx);
     }
 
@@ -116,6 +127,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitDelete(MySQLStatementParser.DeleteContext ctx) {
         commandType = CommandType.DELETE;
+        parseDeleteStatement(ctx.getText());
         return super.visitDelete(ctx);
     }
 
@@ -159,6 +171,7 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
     @Override
     public Object visitUpdate(MySQLStatementParser.UpdateContext ctx) {
         commandType = CommandType.MODIFY;
+        parseUpdateStatement(ctx.getText());
         return super.visitUpdate(ctx);
     }
 
@@ -332,10 +345,185 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
      */
     @Override
     public Object visitIndexName(MySQLStatementParser.IndexNameContext ctx) {
-        if (ctx.getText() != null) {
+        if (commandType == CommandType.CREATE_INDEX && ctx.getText() != null) {
             this.indexName = ctx.getText();
         }
         return super.visitIndexName(ctx);
+    }
+
+    private String sanitizeIdentifier(String identifier) {
+        if (identifier == null) {
+            return "";
+        }
+
+        String trimmed = identifier.trim();
+        if (trimmed.startsWith("`") && trimmed.endsWith("`") && trimmed.length() >= 2) {
+            return trimmed.substring(1, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    private void parseUpdateStatement(String updateText) {
+        if (updateText == null) {
+            return;
+        }
+
+        updatedFieldNames.clear();
+        updatedFieldValues.clear();
+        updatedFieldName = "";
+        updatedFieldValue = null;
+
+        String normalized = updateText.trim();
+        String upper = normalized.toUpperCase();
+        int setPos = upper.indexOf("SET");
+        if (setPos < 0) {
+            return;
+        }
+
+        String tablePart = normalized.substring("UPDATE".length(), setPos).trim();
+        if (!tablePart.isEmpty()) {
+            this.tableName = sanitizeIdentifier(tablePart);
+        }
+
+        int wherePos = upper.indexOf("WHERE", setPos + 3);
+        String assignmentsPart = (wherePos >= 0)
+            ? normalized.substring(setPos + 3, wherePos).trim()
+            : normalized.substring(setPos + 3).trim();
+
+        for (String assignment : splitAssignments(assignmentsPart)) {
+            String[] parts = assignment.split("=", 2);
+            if (parts.length != 2) {
+                continue;
+            }
+
+            String field = sanitizeIdentifier(parts[0].trim());
+            if (field.isEmpty()) {
+                continue;
+            }
+
+            DBConstant value = parseConstant(parts[1].trim());
+            updatedFieldNames.add(field);
+            updatedFieldValues.add(value);
+        }
+
+        if (!updatedFieldNames.isEmpty()) {
+            updatedFieldName = updatedFieldNames.get(0);
+            updatedFieldValue = DBExpression.constant(updatedFieldValues.get(0));
+        }
+    }
+
+    private void parseDeleteStatement(String deleteText) {
+        if (deleteText == null) {
+            return;
+        }
+
+        String normalized = deleteText.trim();
+        String upper = normalized.toUpperCase();
+        int fromPos = upper.indexOf("FROM");
+        if (fromPos < 0) {
+            return;
+        }
+
+        int wherePos = upper.indexOf("WHERE", fromPos + 4);
+        String tablePart = (wherePos >= 0)
+            ? normalized.substring(fromPos + 4, wherePos).trim()
+            : normalized.substring(fromPos + 4).trim();
+
+        if (!tablePart.isEmpty()) {
+            this.tableName = sanitizeIdentifier(tablePart);
+        }
+    }
+
+    private List<String> splitAssignments(String assignmentsPart) {
+        List<String> assignments = new ArrayList<>();
+        if (assignmentsPart == null || assignmentsPart.isBlank()) {
+            return assignments;
+        }
+
+        StringBuilder token = new StringBuilder();
+        boolean inString = false;
+
+        for (int i = 0; i < assignmentsPart.length(); i++) {
+            char ch = assignmentsPart.charAt(i);
+            if (ch == '\'') {
+                inString = !inString;
+            }
+
+            if (ch == ',' && !inString) {
+                String piece = token.toString().trim();
+                if (!piece.isEmpty()) {
+                    assignments.add(piece);
+                }
+                token.setLength(0);
+                continue;
+            }
+
+            token.append(ch);
+        }
+
+        String tail = token.toString().trim();
+        if (!tail.isEmpty()) {
+            assignments.add(tail);
+        }
+
+        return assignments;
+    }
+
+    private DBConstant parseConstant(String literal) {
+        if (literal == null) {
+            return new DBConstant(null);
+        }
+
+        String trimmed = literal.trim();
+        if (trimmed.length() >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+            String inner = trimmed.substring(1, trimmed.length() - 1).replace("''", "'");
+            return new DBConstant(inner);
+        }
+
+        try {
+            return new DBConstant(Integer.parseInt(trimmed));
+        } catch (NumberFormatException ex) {
+            return new DBConstant(trimmed);
+        }
+    }
+
+    private boolean parseUniqueFromCreateIndex(String createIndexText) {
+        if (createIndexText == null) {
+            return false;
+        }
+
+        String normalized = createIndexText.replaceAll("\\s+", "").toUpperCase();
+        return normalized.startsWith("CREATEUNIQUEINDEX");
+    }
+
+    private String extractFirstIndexedColumn(String createIndexText) {
+        if (createIndexText == null) {
+            return "";
+        }
+
+        int openParen = createIndexText.indexOf('(');
+        int closeParen = createIndexText.lastIndexOf(')');
+        if (openParen < 0 || closeParen <= openParen) {
+            return "";
+        }
+
+        String fieldsText = createIndexText.substring(openParen + 1, closeParen).trim();
+        if (fieldsText.isEmpty()) {
+            return "";
+        }
+
+        String firstField = fieldsText.split(",", 2)[0].trim();
+        String normalizedField = firstField.replaceAll("(?i)(ASC|DESC)$", "").trim();
+        return sanitizeIdentifier(normalizedField);
+    }
+
+    private CreateIndexData buildCreateIndexData() {
+        return new CreateIndexData(
+            sanitizeIdentifier(indexName),
+            sanitizeIdentifier(tableName),
+            sanitizeIdentifier(indexFieldName),
+            isUnique
+        );
     }
 
     /**
@@ -480,14 +668,15 @@ public class MySqlStatementVisitor extends MySQLStatementBaseVisitor<Object> {
             case INSERT:
                 return new InsertData(insertFields, insertedVals, tableName);
             case MODIFY:
-                return new UpdateData(List.of(updatedFieldName), pred, tableName);
+                return new UpdateData(updatedFieldNames, updatedFieldValues, pred, tableName);
             case DELETE:
                 return new DeleteData(selectedFields, List.of(pred), tableName);
             case CREATE_TABLE:
                 return new CreateTableData(tableName, tableDTO);
             case CREATE_INDEX:
-                return new CreateIndexData(indexName, tableName, indexFieldName, false);
+                return buildCreateIndexData();
             default:
                 return null;
         }
-    }}
+    }
+}

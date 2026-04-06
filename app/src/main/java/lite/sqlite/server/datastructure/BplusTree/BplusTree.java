@@ -1,5 +1,6 @@
 package lite.sqlite.server.datastructure.BplusTree;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
 public class BplusTree<K extends Comparable<K>,V> {
@@ -53,7 +54,6 @@ public class BplusTree<K extends Comparable<K>,V> {
             
         if (node.isFull(maxDegree)) {
                 insertResult =  splitNode(node, true);
-                System.out.println("Inserting" + insertResult.promotedKey);
             }
             
         }
@@ -67,7 +67,6 @@ public class BplusTree<K extends Comparable<K>,V> {
                 node.getChildren().add(insertPos+1, splitResult.newNode);
                 if (node.isFull(maxDegree)) {
                     insertResult = splitNode(node, false);
-                    System.out.println("Splitted node" + splitResult.promotedKey);
                 }
             }
         }
@@ -111,28 +110,85 @@ public class BplusTree<K extends Comparable<K>,V> {
         return new SplitInfo(promotedKey, newNode);
     }
 
-    private BplusTreeNode<K,V> findLeafToInsert(K key) {
-        BplusTreeNode<K,V> tmpRoot = root;
-        while(!tmpRoot.isLeaf()) {
-            int i = findPositionToInsert(key, tmpRoot);
-            tmpRoot = tmpRoot.getChildren().get(i);
-        } 
-        return tmpRoot;
-    }
-
-    public V search(K key) {
+    /**
+     * Traverses from root to a leaf that can satisfy the given search key.
+     *
+     * @param key target key
+     * @param firstMatch when true, chooses the left-most child path that can still contain {@code key}
+     * @return candidate leaf node for lookup
+     */
+    private BplusTreeNode<K,V> findLeafForSearch(K key, boolean firstMatch) {
         BplusTreeNode<K,V> node = root;
         while (!node.isLeaf()) {
-            int childIndex = findPositionToInsert(key, node);
-            System.out.println("Searching " + key + " in " + node.getKeys() + " -> child " + childIndex);
+            int childIndex = firstMatch
+                ? findFirstChildForKey(key, node)
+                : findPositionToInsert(key, node);
             node = node.getChildren().get(childIndex);
         }
-        
+        return node;
+    }
+
+    /**
+     * Returns one value for a key lookup. For duplicate keys this returns an arbitrary
+     * matching value from the located leaf (suitable for unique indexes).
+     *
+     * @param key lookup key
+     * @return one matching value or null when absent
+     */
+    public V searchUniqueIndex(K key) {
+        BplusTreeNode<K,V> node = findLeafForSearch(key, false);
         int keyIndex = Collections.binarySearch(node.getKeys(), key);
         if (keyIndex >= 0) {
             return node.getValues().get(keyIndex);
         }
         return null;
+    }
+
+    /**
+     * Returns all values whose key equals {@code key}. This method may traverse adjacent
+     * linked leaves because duplicate keys can span leaf split boundaries.
+     *
+     * @param key lookup key
+     * @return list of all matching values, possibly empty
+     */
+    public List<V> searchNonUniqueIndex(K key) {
+        List<V> matches = new ArrayList<>();
+        BplusTreeNode<K,V> node = findLeafForSearch(key, true);
+        int idx = lowerBound(node.getKeys(), key);
+
+        while (node != null) {
+            List<K> keys = node.getKeys();
+            List<V> values = node.getValues();
+            while (idx < keys.size() && keys.get(idx).compareTo(key) == 0) {
+                matches.add(values.get(idx));
+                idx++;
+            }
+
+            if (idx < keys.size()) {
+                break;
+            }
+
+            node = node.getNextLeaf();
+            idx = 0;
+            if (node == null || node.getKeys().isEmpty()) {
+                break;
+            }
+            if (node.getKeys().get(0).compareTo(key) != 0) {
+                break;
+            }
+        }
+
+        return matches;
+    }
+
+    /**
+     * Convenience alias for non-unique lookups.
+     *
+     * @param key lookup key
+     * @return list of all matching values, possibly empty
+     */
+    public List<V> searchAll(K key) {
+        return searchNonUniqueIndex(key);
     }
 
     // public BplusTreeNode search(K key) {};
@@ -165,6 +221,46 @@ public class BplusTree<K extends Comparable<K>,V> {
         }
         return left;
     }
+
+    /**
+     * Finds the first child index in an internal node that may contain {@code key}.
+     * Used to reach the left-most leaf for duplicate-key scans.
+     *
+     * @param key lookup key
+     * @param node internal node
+     * @return child pointer index
+     */
+    private int findFirstChildForKey(K key, BplusTreeNode<K,V> node) {
+        List<K> keys = node.getKeys();
+        int i = 0;
+        while (i < keys.size() && keys.get(i).compareTo(key) < 0) {
+            i++;
+        }
+        return i;
+    }
+
+    /**
+     * Computes the first index i where keys[i] >= key.
+     *
+     * @param keys sorted key list
+     * @param key lookup key
+     * @return lower-bound index in [0, keys.size()]
+     */
+    private int lowerBound(List<K> keys, K key) {
+        int left = 0;
+        int right = keys.size();
+
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            if (keys.get(mid).compareTo(key) < 0) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
     public void printTree() {
         System.out.println("B+ Tree Structure:");
         if (root == null) {

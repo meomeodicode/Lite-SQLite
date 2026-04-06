@@ -11,7 +11,7 @@ import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.filemanager.FileManager;
-import lite.sqlite.server.storage.index.Index;
+import lite.sqlite.server.storage.index.TableIndex;
 import lite.sqlite.server.storage.record.DataType;
 import lite.sqlite.server.storage.record.Record;
 import lite.sqlite.server.storage.record.SlottedRecordPage;
@@ -24,7 +24,7 @@ public class Table implements Iterable<Record> {
     private final Schema schema;
     private final BufferPool bufferPool;
     private final FileManager fileManager;
-    private List<Index<?>> indexes;  // Add this field
+    private List<TableIndex<?>> indexes;  // Add this field
     
     /**
      * Creates a table wrapper bound to a schema, backing buffer pool, and table name.
@@ -53,9 +53,9 @@ public class Table implements Iterable<Record> {
      * @return created index instance
      * @throws IOException when index population reads fail
      */
-    public Index<?> createTypedIndex(String columnName, String tableName, String indexName, boolean isUnique, DataType columnType) throws IOException {
+    public TableIndex<?> createTypedIndex(String columnName, String tableName, String indexName, boolean isUnique, DataType columnType) throws IOException {
         // Check if index already exists
-        for (Index<?> existingIndex : indexes) {
+        for (TableIndex<?> existingIndex : indexes) {
             if (existingIndex.getIndexName().equals(indexName)) {
                 throw new IllegalArgumentException("Index '" + indexName + "' already exists");
             }
@@ -68,13 +68,13 @@ public class Table implements Iterable<Record> {
         }
         
         // Create index based on column type
-        Index<?> newIndex;
+        TableIndex<?> newIndex;
         switch (columnType) {
             case INTEGER:
-                newIndex = new Index<Integer>(indexName, tableName, columnName, isUnique, 100);
+                newIndex = new TableIndex<Integer>(indexName, tableName, columnName, isUnique, 100);
                 break;
             case VARCHAR:
-                newIndex = new Index<String>(indexName, tableName, columnName, isUnique, 100);
+                newIndex = new TableIndex<String>(indexName, tableName, columnName, isUnique, 100);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported column type for indexing: " + columnType);
@@ -95,8 +95,8 @@ public class Table implements Iterable<Record> {
      * @param columnName column name to search
      * @return matching index or null when no index exists
      */
-    public Index<?> findIndexForColumn(String columnName) {
-        for (Index<?> index : indexes) {
+    public TableIndex<?> findIndexForColumn(String columnName) {
+        for (TableIndex<?> index : indexes) {
             if (index.getColumnName().equals(columnName)) {
                 return index;
             }
@@ -109,8 +109,62 @@ public class Table implements Iterable<Record> {
      *
      * @return list of indexes
      */
-    public List<Index<?>> getIndexes() {
+    public List<TableIndex<?>> getIndexes() {
         return new ArrayList<>(indexes);
+    }
+
+    /**
+     * Rebuilds every index registered on this table from current table contents.
+     * Useful after in-place UPDATE/DELETE mutations where keys may have changed.
+     *
+     * @throws IOException when page access fails during index population
+     */
+    public void rebuildIndexes() throws IOException {
+        if (indexes.isEmpty()) {
+            return;
+        }
+
+        List<TableIndex<?>> rebuiltIndexes = new ArrayList<>();
+        for (TableIndex<?> existingIndex : indexes) {
+            int columnIndex = schema.getColumnIndex(existingIndex.getColumnName());
+            if (columnIndex == -1) {
+                throw new IllegalArgumentException(
+                    "Column '" + existingIndex.getColumnName() + "' does not exist"
+                );
+            }
+
+            DataType columnType = schema.getColumn(columnIndex).getType();
+            TableIndex<?> rebuilt;
+            switch (columnType) {
+                case INTEGER:
+                    rebuilt = new TableIndex<Integer>(
+                        existingIndex.getIndexName(),
+                        existingIndex.getTableName(),
+                        existingIndex.getColumnName(),
+                        existingIndex.isUnique(),
+                        existingIndex.getMaxDegree()
+                    );
+                    break;
+                case VARCHAR:
+                    rebuilt = new TableIndex<String>(
+                        existingIndex.getIndexName(),
+                        existingIndex.getTableName(),
+                        existingIndex.getColumnName(),
+                        existingIndex.isUnique(),
+                        existingIndex.getMaxDegree()
+                    );
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                        "Unsupported column type for indexing: " + columnType
+                    );
+            }
+
+            populateIndex(rebuilt, columnIndex);
+            rebuiltIndexes.add(rebuilt);
+        }
+
+        this.indexes = rebuiltIndexes;
     }
     
     /**
@@ -120,38 +174,32 @@ public class Table implements Iterable<Record> {
      * @param columnIndex schema column index used as key source
      * @throws IOException when page access fails
      */
-    private void populateIndex(Index<?> index, int columnIndex) throws IOException {
+    private void populateIndex(TableIndex<?> index, int columnIndex) throws IOException {
         String filename = getFileName();
-        int blockNum = 0;
-        
-        while (true) {
+        int blockCount = fileManager.getBlockCount(filename);
+
+        for (int blockNum = 0; blockNum < blockCount; blockNum++) {
+            Block block = new Block(filename, blockNum);
+            Page page = bufferPool.pinBlock(block);
+
             try {
-                Block block = new Block(filename, blockNum);
-                Page page = bufferPool.pinBlock(block);
-                
-                try {
-                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
-                    
-                    for (RecordWithSlot rws : recordPage.getAllRecords()) {
-                        Object[] values = rws.getRecord();
-                        Object valueObj = values[columnIndex];
-                        
-                        if (valueObj != null && valueObj instanceof Comparable) {
-                            try {
-                                RecordId rid = rws.toRecordId();
-                                updateIndexTyped(index, (Comparable) valueObj, rid);
-                            } catch (Exception e) {
-                                System.err.println("Warning: Failed to index record: " + e.getMessage());
-                            }
+                SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
+
+                for (RecordWithSlot rws : recordPage.getAllRecords()) {
+                    Object[] values = rws.getRecord();
+                    Object valueObj = values[columnIndex];
+
+                    if (valueObj != null && valueObj instanceof Comparable) {
+                        try {
+                            RecordId rid = rws.toRecordId();
+                            updateIndexTyped(index, (Comparable) valueObj, rid);
+                        } catch (Exception e) {
+                            System.err.println("Warning: Failed to index record: " + e.getMessage());
                         }
                     }
-                } finally {
-                    bufferPool.unpinBlock(block);
                 }
-                
-                blockNum++;
-            } catch (Exception e) {
-                break; // No more blocks
+            } finally {
+                bufferPool.unpinBlock(block);
             }
         }
     }
@@ -165,8 +213,8 @@ public class Table implements Iterable<Record> {
      * @param <K> key type
      */
     @SuppressWarnings("unchecked")
-    private <K extends Comparable<K>> void updateIndexTyped(Index<?> index, Comparable value, RecordId rid) {
-        ((Index<K>) index).insert((K) value, rid);
+    private <K extends Comparable<K>> void updateIndexTyped(TableIndex<?> index, Comparable value, RecordId rid) {
+        ((TableIndex<K>) index).insert((K) value, rid);
     }
     
     /**
@@ -187,7 +235,7 @@ public class Table implements Iterable<Record> {
         
         try {
             if (!indexes.isEmpty()) {
-                for (Index<?> index : indexes) {
+                for (TableIndex<?> index : indexes) {
                     if (index.isUnique()) {
                         String colName = index.getColumnName();
                         int colIndex = schema.getColumnIndex(colName);
@@ -219,7 +267,7 @@ public class Table implements Iterable<Record> {
             
             // Update all indexes AFTER successful insert
             if (!indexes.isEmpty()) {
-                for (Index<?> index : indexes) {
+                for (TableIndex<?> index : indexes) {
                     String colName = index.getColumnName();
                     int colIndex = schema.getColumnIndex(colName);
                     Object value = record.getValues()[colIndex];
@@ -250,8 +298,8 @@ public class Table implements Iterable<Record> {
      * @return matching record id or null
      */
     @SuppressWarnings("unchecked")
-    private <K extends Comparable<K>> RecordId searchInIndexTyped(Index<?> index, Comparable value) {
-        return ((Index<K>) index).search((K) value);
+    private <K extends Comparable<K>> RecordId searchInIndexTyped(TableIndex<?> index, Comparable value) {
+        return ((TableIndex<K>) index).search((K) value);
     }
     
     /**
