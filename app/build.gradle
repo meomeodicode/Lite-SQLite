@@ -17,13 +17,17 @@ repositories {
 
 dependencies {
     // Use JUnit 5 for testing
+    implementation libs.guava
+    implementation 'org.apache.shardingsphere:shardingsphere-sql-parser-mysql:5.2.1'
+    implementation 'org.apache.kafka:kafka-clients:3.8.1'
+    implementation 'org.slf4j:slf4j-simple:2.0.13'
+
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+    
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
     testImplementation 'org.mockito:mockito-core:4.0.0'
-    implementation libs.guava
-    implementation 'org.apache.shardingsphere:shardingsphere-sql-parser-mysql:5.2.1'
-    compileOnly 'org.projectlombok:lombok:1.18.30'
-    annotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
 
 test {
@@ -95,5 +99,43 @@ tasks.register('runBenchmark', JavaExec) {
         (project.findProperty('rows') ?: '20000').toString(),
         (project.findProperty('warmup') ?: '50').toString(),
         (project.findProperty('iterations') ?: '200').toString()
+    )
+}
+
+tasks.register('runAnalytics', JavaExec) {
+    group = 'application'
+    description = 'Consume event log and print analytics summary/tail on demand'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.analytics.EventLogAnalyticsRunner'
+    args(
+        (project.findProperty('logPath') ?: 'event-log/events.ndjson').toString(),
+        (project.findProperty('cmd') ?: 'summary').toString(),
+        (project.findProperty('cmdArg') ?: '').toString()
+    )
+}
+
+tasks.register('runKafkaProducerDemo', JavaExec) {
+    group = 'application'
+    description = 'Send sample mutation events to Kafka'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.kafka.KafkaProducerDemo'
+    args(
+        (project.findProperty('bootstrapServers') ?: 'localhost:9092').toString(),
+        (project.findProperty('topic') ?: 'lite-sqlite-mutations').toString(),
+        (project.findProperty('count') ?: '100').toString()
+    )
+}
+
+tasks.register('runKafkaConsumerDemo', JavaExec) {
+    group = 'application'
+    description = 'Consume mutation events from Kafka and print summary'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'lite.sqlite.kafka.KafkaConsumerDemo'
+    args(
+        (project.findProperty('bootstrapServers') ?: 'localhost:9092').toString(),
+        (project.findProperty('topic') ?: 'lite-sqlite-mutations').toString(),
+        (project.findProperty('groupId') ?: 'lite-sqlite-analytics').toString(),
+        (project.findProperty('offsetMode') ?: 'latest').toString(),
+        (project.findProperty('pollCount') ?: '5').toString()
     )
 }
