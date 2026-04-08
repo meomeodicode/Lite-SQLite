@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import lite.sqlite.server.storage.table.RecordId;
+import lite.sqlite.server.storage.record.SlottedRecordPage.RecordWithSlot;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -16,10 +17,27 @@ public class MutationRecordId {
     private final int block;
     private final int slot;
 
+    public static MutationRecordId fromLocation(int block, int slot) {
+        return new MutationRecordId(block, slot);
+    }
+
     public static MutationRecordId from(RecordId recordId) {
+        if (recordId == null) {
+            throw new IllegalArgumentException("recordId must not be null");
+        }
         return new MutationRecordId(
             recordId.getBlockId().getBlockNum(),
             recordId.getSlotNumber()
+        );
+    }
+
+    public static MutationRecordId from(RecordWithSlot recordWithSlot) {
+        if (recordWithSlot == null) {
+            throw new IllegalArgumentException("recordWithSlot must not be null");
+        }
+        return new MutationRecordId(
+            recordWithSlot.getBlock().getBlockNum(),
+            recordWithSlot.getSlot()
         );
     }
 

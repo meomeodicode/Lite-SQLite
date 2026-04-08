@@ -15,23 +15,25 @@ import lite.sqlite.events.config.KafkaMutationConfig;
  */
 public class KafkaProducerDemo {
     public static void main(String[] args) throws Exception {
-        String bootstrapServers = args.length > 0 ? args[0] : KafkaMutationConfig.DEFAULT_BOOTSTRAP_SERVERS;
-        String topic = args.length > 1 ? args[1] : KafkaMutationConfig.DEFAULT_TOPIC;
-        int count = args.length > 2 ? parseIntOrDefault(args[2], 100) : 100;
+        String bootstrapServers = args.length > 0 ? args[0] : KafkaMutationConfig.defaultBootstrapServers();
+        String topic = args.length > 1 ? args[1] : KafkaMutationConfig.defaultTopic();
+        int count = args.length > 2 ? parseIntOrDefault(args[2], KafkaMutationConfig.defaultProducerDemoCount())
+            : KafkaMutationConfig.defaultProducerDemoCount();
+        int statusBuckets = KafkaMutationConfig.demoStatusBuckets();
 
         Properties props = KafkaMutationConfig.producerProperties(bootstrapServers);
-        Path fallback = Path.of("event-log", "kafka-fallback.ndjson");
+        Path fallback = Path.of(KafkaMutationConfig.emitterFallbackPath());
 
         try (KafkaEventEmitter emitter = new KafkaEventEmitter(props, topic, fallback)) {
             long started = System.nanoTime();
             for (int i = 0; i < count; i++) {
                 Map<String, Object> payload = new LinkedHashMap<>();
                 payload.put("id", i + 1);
-                payload.put("status", i % 3);
-                payload.put("source", "KafkaProducerDemo");
+                payload.put("status", i % statusBuckets);
+                payload.put("source", KafkaMutationConfig.demoSource());
 
                 MutationEvent event = MutationEvent.forInsert(
-                    "demo_orders",
+                    KafkaMutationConfig.demoTable(),
                     new MutationRecordId(i / 50, i % 50),
                     payload
                 );

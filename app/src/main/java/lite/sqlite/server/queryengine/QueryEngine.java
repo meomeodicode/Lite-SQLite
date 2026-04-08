@@ -1,5 +1,6 @@
 package lite.sqlite.server.queryengine;
 import lite.sqlite.cli.TableDto;
+import lite.sqlite.events.model.MutationEvent;
 
 /**
  * Interface for query execution engine.
@@ -10,5 +11,6 @@ public interface QueryEngine {
     TableDto doQuery(String sql);
     TableDto doUpdate(String sql);
     TableDto doCreateIndex(String sql);
+    void emitUpdateEvents(MutationEvent mutationEvent);
     default void close() {}
 }

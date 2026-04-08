@@ -75,6 +75,20 @@ public class QueryEngineTest {
             assertTrue(result.getErrorMessage().contains("already exists"), 
                 "Error should mention table already exists");
         }
+
+        @Test
+        @DisplayName("Should not recreate table when physical file already exists after restart")
+        void testCreateTableDuplicateAfterRestart() throws IOException {
+            queryEngine.doUpdate("CREATE TABLE orders (id INTEGER)");
+            queryEngine.close();
+
+            queryEngine = new QueryEngineImpl(testDbDirectory);
+            TableDto result = queryEngine.doUpdate("CREATE TABLE orders (id INTEGER)");
+
+            assertNotNull(result.getErrorMessage(), "Should return error for existing physical table");
+            assertTrue(result.getErrorMessage().contains("already exists"),
+                "Error should mention table already exists");
+        }
     }
 
     @Nested

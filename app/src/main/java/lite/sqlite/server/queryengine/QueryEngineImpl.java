@@ -6,9 +6,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import lite.sqlite.cli.TableDto;
+import lite.sqlite.events.NoOpEventEmitter;
+import lite.sqlite.events.api.EventEmitter;
+import lite.sqlite.events.model.MutationEvent;
+import lite.sqlite.events.model.MutationOperation;
 import lite.sqlite.server.Parser;
 import lite.sqlite.server.model.domain.clause.ComparisonOperator;
 import lite.sqlite.server.model.domain.clause.DBConstant;
@@ -40,14 +45,16 @@ import lite.sqlite.server.storage.record.SlottedRecordPage.RecordWithSlot;
 public class QueryEngineImpl implements QueryEngine {
     
     private final Map<String,Table> tables = new ConcurrentHashMap<>();
+    private final File dbDirectory;
     private final BufferPool bufferPool;
     private final BasicFileManager fileManager;
+    private final EventEmitter eventEmitter;
 
     /**
      * Creates a query engine backed by a local database directory and a fixed-size buffer pool.
      */
     public QueryEngineImpl() {
-        this(new File("database"));
+        this(new File("database"), new NoOpEventEmitter());
     }
 
     /**
@@ -56,8 +63,18 @@ public class QueryEngineImpl implements QueryEngine {
      * @param dbDirectory directory where table files are stored
      */
     public QueryEngineImpl(File dbDirectory) {
+        this(dbDirectory, new NoOpEventEmitter());
+    }
+
+    public QueryEngineImpl(EventEmitter eventEmitter) {
+        this(new File("database"), eventEmitter);
+    }
+
+    public QueryEngineImpl(File dbDirectory, EventEmitter eventEmitter) {
+        this.dbDirectory = dbDirectory;
         this.fileManager = new BasicFileManager(dbDirectory);
         this.bufferPool = new BufferPool(50, fileManager);
+        this.eventEmitter = Objects.requireNonNull(eventEmitter, "eventEmitter must not be null");
     }
 
     /**
@@ -132,6 +149,24 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
+    public void emitUpdateEvents(MutationEvent mutationEvent) {
+        if (mutationEvent == null) {
+            throw new IllegalArgumentException("mutationEvent must not be null");
+        }
+
+        try {
+            eventEmitter.emit(mutationEvent);
+        } catch (IOException e) {
+            // Keep DB mutation successful even if event publication fails.
+            System.err.println("Failed to emit mutation event: " + e.getMessage());
+        }
+    }
+    
+    private void emitMutationResultEvent(String tableName, MutationOperation operation, int rowsAffected) {
+        MutationEvent event = MutationEvent.forMutationResult(tableName, operation, rowsAffected);
+        emitUpdateEvents(event);
+    }
+
     /**
      * Builds an index on a table column using command data produced by the parser.
      *
@@ -200,7 +235,7 @@ public class QueryEngineImpl implements QueryEngine {
             List<Record> candidateRecords = getCandidateRecords(table, queryData.getPredicate());
 
             //filter the candidates 
-             List<Record> filteredRows = (candidateRecords.isEmpty())?candidateRecords:applyWhereFilter(selectedSchema, candidateRecords, queryData.getPredicate());
+            List<Record> filteredRows = (candidateRecords.isEmpty())?candidateRecords:applyWhereFilter(selectedSchema, candidateRecords, queryData.getPredicate());
             List<Integer> columnIndexes = new ArrayList<>();
         
             for (String columnName: selectedColumns) {
@@ -379,7 +414,7 @@ public class QueryEngineImpl implements QueryEngine {
     private TableDto executeCreateTable(CreateTableData createData) {
         String tableName = createData.getTableName();
         
-        if (tables.containsKey(tableName)) {
+        if (tables.containsKey(tableName) || tableFileExists(tableName)) {
             return TableDto.forError("Table '" + tableName + "' already exists");
         }
         
@@ -397,6 +432,11 @@ public class QueryEngineImpl implements QueryEngine {
         return TableDto.forError("Error creating table: " + e.getMessage());
     }
 }
+
+    private boolean tableFileExists(String tableName) {
+        File tableFile = new File(dbDirectory, tableName + ".tbl");
+        return tableFile.exists();
+    }
 
     /**
      * Inserts one record into a target table after validating fields and converting
@@ -439,6 +479,7 @@ public class QueryEngineImpl implements QueryEngine {
             table.insertRecord(record);
             
             bufferPool.flushAll();
+            emitMutationResultEvent(tableName, MutationOperation.INSERT, 1);
             
             return TableDto.forUpdateResult(1);
         } catch (Exception e) {
@@ -514,7 +555,6 @@ public class QueryEngineImpl implements QueryEngine {
                                 "Unable to update record at block " + blockNum + ", slot " + recordWithSlot.getSlot()
                             );
                         }
-
                         affectedRows++;
                     }
                 } finally {
@@ -524,6 +564,7 @@ public class QueryEngineImpl implements QueryEngine {
 
             table.rebuildIndexes();
             bufferPool.flushAll();
+            emitMutationResultEvent(tableName, MutationOperation.UPDATE, affectedRows);
             return TableDto.forUpdateResult(affectedRows);
         } catch (Exception e) {
             e.printStackTrace();
@@ -580,6 +621,7 @@ public class QueryEngineImpl implements QueryEngine {
 
             table.rebuildIndexes();
             bufferPool.flushAll();
+            emitMutationResultEvent(tableName, MutationOperation.DELETE, affectedRows);
             return TableDto.forUpdateResult(affectedRows);
         } catch (Exception e) {
             e.printStackTrace();

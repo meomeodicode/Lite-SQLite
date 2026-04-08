@@ -7,15 +7,73 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
+import lite.sqlite.config.AppConfig;
+
 /**
- * Central Kafka config and naming for mutation events.
+ * Central Kafka config facade backed by the app-wide configuration bootstrap.
  */
 public final class KafkaMutationConfig {
-    public static final String DEFAULT_BOOTSTRAP_SERVERS = "localhost:9092";
-    public static final String DEFAULT_TOPIC = "lite-sqlite-mutations";
-    public static final String DEFAULT_CONSUMER_GROUP = "lite-sqlite-analytics";
+    public static final String KEY_BOOTSTRAP_SERVERS = "kafka.bootstrap.servers";
+    public static final String KEY_TOPIC = "kafka.topic";
+    public static final String KEY_CONSUMER_GROUP = "kafka.consumer.group.id";
+    public static final String KEY_CONSUMER_OFFSET_RESET = "kafka.consumer.offset.reset";
+    public static final String KEY_CONSUMER_POLL_COUNT = "kafka.consumer.poll.count";
+    public static final String KEY_CONSUMER_POLL_TIMEOUT_MS = "kafka.consumer.poll.timeout.ms";
+    public static final String KEY_PRODUCER_DEMO_COUNT = "kafka.producer.demo.count";
+    public static final String KEY_EMITTER_FALLBACK_PATH = "kafka.emitter.fallback.path";
+    public static final String KEY_PRODUCER_ACKS = "kafka.producer.acks";
+    public static final String KEY_PRODUCER_IDEMPOTENCE = "kafka.producer.enable.idempotence";
+    public static final String KEY_PRODUCER_RETRIES = "kafka.producer.retries";
+    public static final String KEY_PRODUCER_MAX_IN_FLIGHT = "kafka.producer.max.in.flight.requests.per.connection";
+    public static final String KEY_DEMO_TABLE = "kafka.demo.table";
+    public static final String KEY_DEMO_SOURCE = "kafka.demo.source";
+    public static final String KEY_DEMO_STATUS_BUCKETS = "kafka.demo.status.buckets";
 
     private KafkaMutationConfig() {
+    }
+
+    public static String defaultBootstrapServers() {
+        return AppConfig.getRequired(KEY_BOOTSTRAP_SERVERS);
+    }
+
+    public static String defaultTopic() {
+        return AppConfig.getRequired(KEY_TOPIC);
+    }
+
+    public static String defaultConsumerGroup() {
+        return AppConfig.getRequired(KEY_CONSUMER_GROUP);
+    }
+
+    public static String defaultConsumerOffsetReset() {
+        return AppConfig.getRequired(KEY_CONSUMER_OFFSET_RESET);
+    }
+
+    public static int defaultConsumerPollCount() {
+        return AppConfig.getRequiredInt(KEY_CONSUMER_POLL_COUNT);
+    }
+
+    public static int defaultConsumerPollTimeoutMs() {
+        return AppConfig.getRequiredInt(KEY_CONSUMER_POLL_TIMEOUT_MS);
+    }
+
+    public static int defaultProducerDemoCount() {
+        return AppConfig.getRequiredInt(KEY_PRODUCER_DEMO_COUNT);
+    }
+
+    public static String emitterFallbackPath() {
+        return AppConfig.getRequired(KEY_EMITTER_FALLBACK_PATH);
+    }
+
+    public static String demoTable() {
+        return AppConfig.getRequired(KEY_DEMO_TABLE);
+    }
+
+    public static String demoSource() {
+        return AppConfig.getRequired(KEY_DEMO_SOURCE);
+    }
+
+    public static int demoStatusBuckets() {
+        return AppConfig.getRequiredInt(KEY_DEMO_STATUS_BUCKETS);
     }
 
     public static Properties producerProperties(String bootstrapServers) {
@@ -23,10 +81,10 @@ public final class KafkaMutationConfig {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        props.put(ProducerConfig.ACKS_CONFIG, "all");
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-        props.put(ProducerConfig.RETRIES_CONFIG, Integer.toString(Integer.MAX_VALUE));
-        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "5");
+        props.put(ProducerConfig.ACKS_CONFIG, AppConfig.getRequired(KEY_PRODUCER_ACKS));
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, AppConfig.getRequired(KEY_PRODUCER_IDEMPOTENCE));
+        props.put(ProducerConfig.RETRIES_CONFIG, AppConfig.getRequired(KEY_PRODUCER_RETRIES));
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, AppConfig.getRequired(KEY_PRODUCER_MAX_IN_FLIGHT));
         return props;
     }
 

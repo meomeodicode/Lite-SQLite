@@ -19,11 +19,13 @@ import lite.sqlite.events.config.KafkaMutationConfig;
  */
 public class KafkaConsumerDemo {
     public static void main(String[] args) {
-        String bootstrapServers = args.length > 0 ? args[0] : KafkaMutationConfig.DEFAULT_BOOTSTRAP_SERVERS;
-        String topic = args.length > 1 ? args[1] : KafkaMutationConfig.DEFAULT_TOPIC;
-        String groupId = args.length > 2 ? args[2] : KafkaMutationConfig.DEFAULT_CONSUMER_GROUP;
-        String offsetMode = args.length > 3 ? args[3] : "latest";
-        int pollCount = args.length > 4 ? parseIntOrDefault(args[4], 5) : 5;
+        String bootstrapServers = args.length > 0 ? args[0] : KafkaMutationConfig.defaultBootstrapServers();
+        String topic = args.length > 1 ? args[1] : KafkaMutationConfig.defaultTopic();
+        String groupId = args.length > 2 ? args[2] : KafkaMutationConfig.defaultConsumerGroup();
+        String offsetMode = args.length > 3 ? args[3] : KafkaMutationConfig.defaultConsumerOffsetReset();
+        int pollCount = args.length > 4 ? parseIntOrDefault(args[4], KafkaMutationConfig.defaultConsumerPollCount())
+            : KafkaMutationConfig.defaultConsumerPollCount();
+        Duration pollTimeout = Duration.ofMillis(KafkaMutationConfig.defaultConsumerPollTimeoutMs());
 
         Properties props = KafkaMutationConfig.consumerProperties(bootstrapServers, groupId, offsetMode);
 
@@ -34,7 +36,7 @@ public class KafkaConsumerDemo {
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props)) {
             consumer.subscribe(List.of(topic));
             for (int i = 0; i < pollCount; i++) {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(2));
+                ConsumerRecords<String, String> records = consumer.poll(pollTimeout);
                 for (ConsumerRecord<String, String> record : records) {
                     total++;
                     String eventType = extractJsonString(record.value(), "event_type", "UNKNOWN");
