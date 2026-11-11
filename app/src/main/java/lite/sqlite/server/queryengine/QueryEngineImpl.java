@@ -2,8 +2,15 @@ package lite.sqlite.server.queryengine;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -15,6 +22,11 @@ import lite.sqlite.events.api.EventEmitter;
 import lite.sqlite.events.model.MutationEvent;
 import lite.sqlite.events.model.MutationOperation;
 import lite.sqlite.server.Parser;
+import lite.sqlite.server.catalog.Catalog;
+import lite.sqlite.server.catalog.Catalog.ColumnDef;
+import lite.sqlite.server.catalog.Catalog.TableDef;
+import lite.sqlite.server.catalog.CatalogStore;
+import lite.sqlite.server.storage.record.Column;
 import lite.sqlite.server.model.domain.clause.ComparisonOperator;
 import lite.sqlite.server.model.domain.clause.DBConstant;
 import lite.sqlite.server.model.domain.clause.DBPredicate;
@@ -49,6 +61,7 @@ public class QueryEngineImpl implements QueryEngine {
     private final BufferPool bufferPool;
     private final BasicFileManager fileManager;
     private final EventEmitter eventEmitter;
+    private final CatalogStore catalogStore;
 
     /**
      * Creates a query engine backed by a local database directory and a fixed-size buffer pool.
@@ -71,10 +84,64 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     public QueryEngineImpl(File dbDirectory, EventEmitter eventEmitter) {
+        this(dbDirectory, eventEmitter, new CatalogStore(dbDirectory.toPath()));
+    }
+
+    /**
+     * Opens the engine on {@code dbDirectory} and rebuilds every table listed in the catalog.
+     * Fails closed (throws, touches no file) when the catalog is unreadable or lists a table
+     * whose .tbl file is missing (D-007). Tests pass their own store to inject save failures.
+     */
+    QueryEngineImpl(File dbDirectory, EventEmitter eventEmitter, CatalogStore catalogStore) {
         this.dbDirectory = dbDirectory;
+        this.eventEmitter = Objects.requireNonNull(eventEmitter, "eventEmitter must not be null");
+        this.catalogStore = Objects.requireNonNull(catalogStore, "catalogStore must not be null");
         this.fileManager = new BasicFileManager(dbDirectory);
         this.bufferPool = new BufferPool(50, fileManager);
-        this.eventEmitter = Objects.requireNonNull(eventEmitter, "eventEmitter must not be null");
+        loadCatalog();
+    }
+
+    private void loadCatalog() {
+        Catalog catalog;
+        try {
+            catalog = catalogStore.load();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read catalog in " + dbDirectory
+                    + "; refusing to start with an empty catalog", e);
+        }
+
+        for (TableDef def : catalog.tables()) {
+            // Check before anything opens the file: opening creates it (memo gotcha 1).
+            Path tableFile = tableFile(def.name());
+            if (!Files.exists(tableFile)) {
+                throw new IllegalStateException("Catalog lists table '" + def.name() + "' but its file "
+                        + tableFile + " is missing; refusing to start");
+            }
+            Schema schema = new Schema();
+            for (ColumnDef column : def.columns()) {
+                schema.addColumn(column.name(), column.type(), column.maxLength());
+            }
+            tables.put(def.name(), new Table(schema, bufferPool, def.name(), fileManager));
+        }
+
+        warnAboutOrphans();
+    }
+
+    private void warnAboutOrphans() {
+        File[] files = dbDirectory.listFiles((dir, name) -> name.endsWith(".tbl"));
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            String name = file.getName().substring(0, file.getName().length() - ".tbl".length());
+            if (!tables.containsKey(name)) {
+                System.err.println("WARNING: " + file + " has no catalog entry; it is not loaded and is left untouched");
+            }
+        }
+    }
+
+    private Path tableFile(String tableName) {
+        return dbDirectory.toPath().resolve(tableName + ".tbl");
     }
 
     /**
@@ -406,36 +473,79 @@ public class QueryEngineImpl implements QueryEngine {
     }
 
     /**
-     * Creates a new in-memory table with the provided schema definition.
+     * Creates a table: the .tbl file first (the data), then the catalog save (the commit
+     * point), then the in-memory map (D-007). A failure before the save leaves at most an
+     * all-zero orphan file, which the next CREATE of the same name reuses.
      *
      * @param createData parsed CREATE TABLE command data
      * @return update result table or an error table
      */
     private TableDto executeCreateTable(CreateTableData createData) {
         String tableName = createData.getTableName();
-        
-        if (tables.containsKey(tableName) || tableFileExists(tableName)) {
+
+        // The catalog (loaded into the map) is the only answer to "does it exist" (D-007).
+        if (tables.containsKey(tableName)) {
             return TableDto.forError("Table '" + tableName + "' already exists");
         }
-        
+
         try {
+            Path tableFile = tableFile(tableName);
+            if (Files.exists(tableFile)) {
+                if (!isAllZero(tableFile)) {
+                    return TableDto.forError("Cannot create table '" + tableName + "': " + tableFile
+                            + " exists with data but has no catalog entry; inspect or remove it by hand");
+                }
+                try (FileChannel channel = FileChannel.open(tableFile, StandardOpenOption.WRITE)) {
+                    channel.truncate(0);
+                }
+            }
+
             Schema newSchema = createData.getSchemaPresentation().convertToSchema();
             Table newTable = new Table(newSchema, bufferPool, tableName, fileManager);
             fileManager.initializePhysicalTable(newTable);
-            
-            tables.put(tableName, newTable);
-        
-        return TableDto.forUpdateResult(0);
-    } catch (Exception e) {
-        // Print the full stack trace for better debugging
-        e.printStackTrace();
-        return TableDto.forError("Error creating table: " + e.getMessage());
-    }
-}
 
-    private boolean tableFileExists(String tableName) {
-        File tableFile = new File(dbDirectory, tableName + ".tbl");
-        return tableFile.exists();
+            catalogStore.save(catalogWith(tableName, newSchema));
+
+            tables.put(tableName, newTable);
+            return TableDto.forUpdateResult(0);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return TableDto.forError("Error creating table: " + e.getMessage());
+        }
+    }
+
+    /** The catalog as it would be with one more table. Slice 2 stores no index definitions (slice 3). */
+    private Catalog catalogWith(String newName, Schema newSchema) {
+        List<TableDef> defs = new ArrayList<>();
+        for (Map.Entry<String, Table> entry : tables.entrySet()) {
+            defs.add(toTableDef(entry.getKey(), entry.getValue().getSchema()));
+        }
+        defs.add(toTableDef(newName, newSchema));
+        defs.sort(Comparator.comparing(TableDef::name));
+        return new Catalog(defs);
+    }
+
+    private static TableDef toTableDef(String name, Schema schema) {
+        List<ColumnDef> columns = new ArrayList<>();
+        for (Column column : schema.getColumns()) {
+            columns.add(new ColumnDef(column.getName(), column.getType(), column.getMaxLength()));
+        }
+        return new TableDef(name, columns, List.of());
+    }
+
+    private static boolean isAllZero(Path file) throws IOException {
+        byte[] buffer = new byte[Page.PAGE_SIZE];
+        try (InputStream in = Files.newInputStream(file)) {
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                for (int i = 0; i < read; i++) {
+                    if (buffer[i] != 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     /**

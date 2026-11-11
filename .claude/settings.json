@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && { cat docs/STATUS.md; echo; echo '## Last 5 commits'; git log --oneline -5; } 2>/dev/null || true",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
