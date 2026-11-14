@@ -7,9 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -23,13 +25,11 @@ import org.junit.jupiter.api.io.TempDir;
 import lite.sqlite.cli.TableDto;
 import lite.sqlite.events.NoOpEventEmitter;
 import lite.sqlite.server.catalog.Catalog;
+import lite.sqlite.server.catalog.CatalogCorruptException;
 import lite.sqlite.server.catalog.CatalogStore;
 import lite.sqlite.server.storage.Page;
 
-/**
- * Slice 2 checks C3, C5, C7, C8 (docs/spec-slice2-catalog-wiring.md section 6).
- * Expected results were predicted by the user before implementation (D-006).
- */
+
 @DisplayName("Catalog wiring E2E")
 class CatalogWiringE2ETest {
 
@@ -83,6 +83,50 @@ class CatalogWiringE2ETest {
         assertTrue(e.getMessage().contains("customers.tbl"), "error should name the missing file: " + e.getMessage());
         assertFalse(Files.exists(tbl("customers")), "the missing .tbl must not be recreated");
         assertArrayEquals(catalogBefore, Files.readAllBytes(catalogFile), "catalog.dat must be unchanged");
+    }
+
+    @Test
+    @DisplayName("C4: a flipped catalog byte fails closed; catalog.dat and .tbl bytes unchanged")
+    void flippedCatalogByteFailsClosed() throws IOException {
+        engine = new QueryEngineImpl(dbDirectory);
+        assertNull(engine.doUpdate("CREATE TABLE customers (id INTEGER, name VARCHAR(50))").getErrorMessage());
+        assertNull(engine.doUpdate("INSERT INTO customers (id, name) VALUES (1, 'alice')").getErrorMessage());
+        engine.close();
+        engine = null;
+
+        byte[] tblBefore = Files.readAllBytes(tbl("customers"));
+
+        // Flip the case of the 'c' in "customers" inside the payload. Header, length and
+        // payload shape stay valid, so only the CRC can catch it. Without the CRC the engine
+        // would load a table "Customers": on Windows (case-insensitive) it finds customers.tbl
+        // and starts with no error; elsewhere it fails on a missing file, which the cause
+        // check below tells apart from a CRC rejection.
+        byte[] damaged = Files.readAllBytes(catalogFile);
+        int at = indexOf(damaged, "customers".getBytes(StandardCharsets.UTF_8));
+        assertTrue(at >= 0, "precondition: table name is stored in catalog.dat");
+        damaged[at] ^= 0x20;
+        Files.write(catalogFile, damaged);
+
+        RuntimeException e = assertThrows(RuntimeException.class, () -> new QueryEngineImpl(dbDirectory));
+
+        CatalogCorruptException cause = assertInstanceOf(CatalogCorruptException.class, e.getCause(),
+                "the CRC should reject the catalog: " + e);
+        assertTrue(cause.getMessage().contains("checksum"), cause.getMessage());
+        assertArrayEquals(damaged, Files.readAllBytes(catalogFile), "damaged catalog.dat must be left as found");
+        assertArrayEquals(tblBefore, Files.readAllBytes(tbl("customers")), ".tbl must be unchanged");
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
     }
 
     @Test

@@ -2,6 +2,7 @@ package lite.sqlite.server.storage.table;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -378,62 +379,53 @@ public class Table implements Iterable<Record> {
         private int currentBlockNum = 0;
         private List<RecordWithSlot> currentRecords = new ArrayList<>();
         private int currentRecordIndex = 0;
-        private boolean hasMoreBlocks = true;
-        
-        /**
-         * Initializes iterator state and loads the first data block.
-         */
-        public TableIterator() {
-            loadNextBlock();
+
+        /** Number of blocks the table file holds now; the scan's end-of-table rule (same as DELETE). */
+        private int blockCount() {
+            try {
+                return fileManager.getBlockCount(getFileName());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot get block count of " + getFileName(), e);
+            }
         }
-        
+
         /**
-         * Loads records from the next block into memory for iteration.
+         * Loads the live records of block {@code currentBlockNum} and moves to the next block.
+         * An empty block yields an empty list; hasNext() then moves on.
          */
         private void loadNextBlock() {
-            currentRecords.clear();
+            currentRecords = new ArrayList<>();
             currentRecordIndex = 0;
-            
-            if (!hasMoreBlocks) return;
-            
+
+            Block block = new Block(getFileName(), currentBlockNum);
+            currentBlockNum++;
             try {
-                String filename = getFileName();
-                Block block = new Block(filename, currentBlockNum);
                 Page page = bufferPool.pinBlock(block);
-                
                 try {
-                    SlottedRecordPage recordPage = new SlottedRecordPage(page, schema, block, bufferPool);
-                    currentRecords = recordPage.getAllRecords();
-                    currentBlockNum++;
+                    currentRecords = new SlottedRecordPage(page, schema, block, bufferPool).getAllRecords();
                 } finally {
                     bufferPool.unpinBlock(block);
                 }
             } catch (Exception e) {
-                hasMoreBlocks = false;
-            }
-            
-            if (currentRecords.isEmpty()) {
-                hasMoreBlocks = false;
+                // A damaged block is not an empty block: fail the scan loudly (slice 2.5, Q2).
+                throw new IllegalStateException("Cannot read block " + block.getBlockNum()
+                        + " of " + getFileName() + ": " + e.getMessage(), e);
             }
         }
-        
+
         /**
-         * Indicates whether another record is available.
-         *
-         * @return true when a subsequent record exists
+         * True while a record remains. Skips empty blocks; the table ends after its last block
+         * on disk (same rule as DELETE), never at the first empty block.
          */
         @Override
         public boolean hasNext() {
-            if (currentRecordIndex < currentRecords.size()) {
-                return true;
-            }
-            
-            if (hasMoreBlocks) {
+            while (currentRecordIndex >= currentRecords.size()) {
+                if (currentBlockNum >= blockCount()) {
+                    return false;
+                }
                 loadNextBlock();
-                return currentRecordIndex < currentRecords.size();
             }
-            
-            return false;
+            return true;
         }
         
         /**
