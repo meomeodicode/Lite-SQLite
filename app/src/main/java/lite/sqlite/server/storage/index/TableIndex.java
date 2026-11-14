@@ -32,16 +32,16 @@ public class TableIndex<K extends Comparable<K>> {
      * @param recordToInsert record identifier to store
      */
     public void insert(K key, RecordId recordToInsert) {
+    
+        // The index is the enforcer: it throws, and callers let it propagate (D-010).
         if (isUnique) {
             RecordId recordWithThisKey = tree.searchUniqueIndex(key);
             if (recordWithThisKey != null) {
                 throw new IllegalArgumentException(
-                String.format("Duplicate key '%s' in unique index '%s' on table '%s'", 
-                    key, indexName, tableName)
-            );
+                    String.format("Duplicate key '%s' in unique index '%s' on table '%s'",
+                        key, indexName, tableName));
             }
         }
-
         tree.insert(key, recordToInsert);
     }
     

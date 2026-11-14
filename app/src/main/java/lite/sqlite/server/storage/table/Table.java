@@ -44,52 +44,55 @@ public class Table implements Iterable<Record> {
     
     // Index management methods
     /**
-     * Creates and populates a typed index for a specific column.
+     * Builds and populates a typed index for a column without registering it on this table.
+     * The caller publishes it with {@link #addIndex} only after the catalog save succeeds
+     * (slice 3, C14), so a failed save leaves no index in memory.
      *
-     * @param columnName indexed column name
-     * @param tableName table name used by index metadata
      * @param indexName index name
+     * @param columnName indexed column name
      * @param isUnique true when duplicate keys are not allowed
-     * @param columnType schema type of the indexed column
-     * @return created index instance
+     * @param maxDegree B+tree max degree, from the catalog or the engine default
+     * @return populated, unregistered index
      * @throws IOException when index population reads fail
      */
-    public TableIndex<?> createTypedIndex(String columnName, String tableName, String indexName, boolean isUnique, DataType columnType) throws IOException {
-        // Check if index already exists
+    public TableIndex<?> buildIndex(String indexName, String columnName, boolean isUnique, int maxDegree) throws IOException {
         for (TableIndex<?> existingIndex : indexes) {
             if (existingIndex.getIndexName().equals(indexName)) {
                 throw new IllegalArgumentException("Index '" + indexName + "' already exists");
             }
         }
-        
-        // Validate column exists
+
         int columnIndex = schema.getColumnIndex(columnName);
         if (columnIndex == -1) {
             throw new IllegalArgumentException("Column '" + columnName + "' does not exist");
         }
-        
-        // Create index based on column type
-        TableIndex<?> newIndex;
+
+        TableIndex<?> newIndex = newTypedIndex(indexName, columnName, isUnique, maxDegree,
+                schema.getColumn(columnIndex).getType());
+        populateIndex(newIndex, columnIndex);
+        return newIndex;
+    }
+
+    /**
+     * Registers an index built by {@link #buildIndex}; from here on INSERT maintains and checks it.
+     *
+     * @param index populated index
+     */
+    public void addIndex(TableIndex<?> index) {
+        indexes.add(index);
+    }
+
+    private TableIndex<?> newTypedIndex(String indexName, String columnName, boolean isUnique, int maxDegree, DataType columnType) {
         switch (columnType) {
             case INTEGER:
-                newIndex = new TableIndex<Integer>(indexName, tableName, columnName, isUnique, 100);
-                break;
+                return new TableIndex<Integer>(indexName, tableName, columnName, isUnique, maxDegree);
             case VARCHAR:
-                newIndex = new TableIndex<String>(indexName, tableName, columnName, isUnique, 100);
-                break;
+                return new TableIndex<String>(indexName, tableName, columnName, isUnique, maxDegree);
             default:
                 throw new UnsupportedOperationException("Unsupported column type for indexing: " + columnType);
         }
-        
-        // Populate index with existing data
-        populateIndex(newIndex, columnIndex);
-        
-        // Add to indexes list
-        indexes.add(newIndex);
-        
-        return newIndex;
     }
-    
+
     /**
      * Finds the first index registered for the given column.
      *
@@ -134,32 +137,13 @@ public class Table implements Iterable<Record> {
                 );
             }
 
-            DataType columnType = schema.getColumn(columnIndex).getType();
-            TableIndex<?> rebuilt;
-            switch (columnType) {
-                case INTEGER:
-                    rebuilt = new TableIndex<Integer>(
-                        existingIndex.getIndexName(),
-                        existingIndex.getTableName(),
-                        existingIndex.getColumnName(),
-                        existingIndex.isUnique(),
-                        existingIndex.getMaxDegree()
-                    );
-                    break;
-                case VARCHAR:
-                    rebuilt = new TableIndex<String>(
-                        existingIndex.getIndexName(),
-                        existingIndex.getTableName(),
-                        existingIndex.getColumnName(),
-                        existingIndex.isUnique(),
-                        existingIndex.getMaxDegree()
-                    );
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                        "Unsupported column type for indexing: " + columnType
-                    );
-            }
+            TableIndex<?> rebuilt = newTypedIndex(
+                existingIndex.getIndexName(),
+                existingIndex.getColumnName(),
+                existingIndex.isUnique(),
+                existingIndex.getMaxDegree(),
+                schema.getColumn(columnIndex).getType()
+            );
 
             populateIndex(rebuilt, columnIndex);
             rebuiltIndexes.add(rebuilt);
@@ -191,12 +175,13 @@ public class Table implements Iterable<Record> {
                     Object valueObj = values[columnIndex];
 
                     if (valueObj != null && valueObj instanceof Comparable) {
-                        try {
-                            RecordId rid = rws.toRecordId();
-                            updateIndexTyped(index, (Comparable) valueObj, rid);
-                        } catch (Exception e) {
-                            System.err.println("Warning: Failed to index record: " + e.getMessage());
-                        }
+                        // D-010: the index owns the uniqueness rule. TableIndex.insert throws on a
+                        // duplicate (only when isUnique), and nothing here may swallow it: the build
+                        // fails, and the caller decides (CREATE INDEX errors, open fails closed).
+                        // rebuildIndexes() after UPDATE/DELETE fails the same way; the row is already
+                        // changed on its page by then (gap deferred to P1).
+                        RecordId rid = rws.toRecordId();
+                        updateIndexTyped(index, (Comparable) valueObj, rid);
                     }
                 }
             } finally {

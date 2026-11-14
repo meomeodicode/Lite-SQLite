@@ -24,6 +24,7 @@ import lite.sqlite.events.model.MutationOperation;
 import lite.sqlite.server.Parser;
 import lite.sqlite.server.catalog.Catalog;
 import lite.sqlite.server.catalog.Catalog.ColumnDef;
+import lite.sqlite.server.catalog.Catalog.IndexDef;
 import lite.sqlite.server.catalog.Catalog.TableDef;
 import lite.sqlite.server.catalog.CatalogStore;
 import lite.sqlite.server.storage.record.Column;
@@ -62,6 +63,9 @@ public class QueryEngineImpl implements QueryEngine {
     private final BasicFileManager fileManager;
     private final EventEmitter eventEmitter;
     private final CatalogStore catalogStore;
+
+    /** B+tree max degree for new indexes; stored per index in the catalog, so changing it never affects old ones. */
+    static final int DEFAULT_MAX_DEGREE = 100;
 
     /**
      * Creates a query engine backed by a local database directory and a fixed-size buffer pool.
@@ -121,7 +125,17 @@ public class QueryEngineImpl implements QueryEngine {
             for (ColumnDef column : def.columns()) {
                 schema.addColumn(column.name(), column.type(), column.maxLength());
             }
-            tables.put(def.name(), new Table(schema, bufferPool, def.name(), fileManager));
+            Table table = new Table(schema, bufferPool, def.name(), fileManager);
+            tables.put(def.name(), table);
+
+            // TODO(human): slice 3, C9/C10/C11/C13. Rebuild every index in def.indexes() from the heap.
+            //   - Table.buildIndex(...) (Table.java:57) builds and populates without registering;
+            //     Table.addIndex(...) registers. Which IndexDef field replaces the hard-coded 100?
+            //   - D-010: a unique violation here must fail closed. Let the start-up fail with a
+            //     message naming the table, the index and (through the cause) the key, the same way
+            //     the missing-.tbl check above does. Opening must not write any file.
+            //   - A failed open must release what it opened (fileManager holds .tbl handles), or the
+            //     user cannot repair the file it just named. C13 deletes users.tbl to check this.
         }
 
         warnAboutOrphans();
@@ -138,6 +152,11 @@ public class QueryEngineImpl implements QueryEngine {
                 System.err.println("WARNING: " + file + " has no catalog entry; it is not loaded and is left untouched");
             }
         }
+    }
+
+    /** Test seam: the live Table object, so E2E tests can see index state the SQL surface hides. */
+    Table tableForTest(String tableName) {
+        return tables.get(tableName);
     }
 
     private Path tableFile(String tableName) {
@@ -260,10 +279,16 @@ public class QueryEngineImpl implements QueryEngine {
         }
         
         try {
-            DataType columnType = schema.getColumn(columnIndex).getType();
-            TableIndex<?> newIndex = table.createTypedIndex(columnName, tableName, indexName, isUnique, columnType);    
+            // TODO(human): slice 3 commit order (D-007 rule; C12, C14). The pieces, in no particular order:
+            //   publish: table.addIndex(newIndex)
+            //   build:   table.buildIndex(indexName, columnName, isUnique, DEFAULT_MAX_DEGREE)
+            //   commit:  catalogStore.save(catalogWithIndex(tableName, newIndex))
+            // Order them so that a throw at any step leaves memory and catalog.dat agreeing.
+            // Placeholder below = today's behaviour (no save), so C9-C14 stay red until you replace it.
+            TableIndex<?> newIndex = table.buildIndex(indexName, columnName, isUnique, DEFAULT_MAX_DEGREE);
+            table.addIndex(newIndex);
             return TableDto.forIndexResult(newIndex.getColumnName());
-            
+
         } catch (Exception e) {
             e.printStackTrace();
             return TableDto.forError("Error creating index: " + e.getMessage());
@@ -514,23 +539,43 @@ public class QueryEngineImpl implements QueryEngine {
         }
     }
 
-    /** The catalog as it would be with one more table. Slice 2 stores no index definitions (slice 3). */
+    /** The catalog as it would be with one more table; existing tables keep their index definitions. */
     private Catalog catalogWith(String newName, Schema newSchema) {
         List<TableDef> defs = new ArrayList<>();
         for (Map.Entry<String, Table> entry : tables.entrySet()) {
-            defs.add(toTableDef(entry.getKey(), entry.getValue().getSchema()));
+            Table table = entry.getValue();
+            defs.add(toTableDef(entry.getKey(), table.getSchema(), table.getIndexes()));
         }
-        defs.add(toTableDef(newName, newSchema));
+        defs.add(toTableDef(newName, newSchema, List.of()));
         defs.sort(Comparator.comparing(TableDef::name));
         return new Catalog(defs);
     }
 
-    private static TableDef toTableDef(String name, Schema schema) {
+    /** The catalog as it would be with {@code newIndex} added to {@code tableName}; memory is not touched. */
+    private Catalog catalogWithIndex(String tableName, TableIndex<?> newIndex) {
+        List<TableDef> defs = new ArrayList<>();
+        for (Map.Entry<String, Table> entry : tables.entrySet()) {
+            Table table = entry.getValue();
+            List<TableIndex<?>> indexes = table.getIndexes();
+            if (entry.getKey().equals(tableName)) {
+                indexes.add(newIndex);
+            }
+            defs.add(toTableDef(entry.getKey(), table.getSchema(), indexes));
+        }
+        defs.sort(Comparator.comparing(TableDef::name));
+        return new Catalog(defs);
+    }
+
+    private static TableDef toTableDef(String name, Schema schema, List<TableIndex<?>> indexes) {
         List<ColumnDef> columns = new ArrayList<>();
         for (Column column : schema.getColumns()) {
             columns.add(new ColumnDef(column.getName(), column.getType(), column.getMaxLength()));
         }
-        return new TableDef(name, columns, List.of());
+        List<IndexDef> indexDefs = new ArrayList<>();
+        for (TableIndex<?> index : indexes) {
+            indexDefs.add(new IndexDef(index.getIndexName(), index.getColumnName(), index.isUnique(), index.getMaxDegree()));
+        }
+        return new TableDef(name, columns, List.copyOf(indexDefs));
     }
 
     private static boolean isAllZero(Path file) throws IOException {
