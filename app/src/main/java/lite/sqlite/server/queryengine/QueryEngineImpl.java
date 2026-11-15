@@ -126,19 +126,29 @@ public class QueryEngineImpl implements QueryEngine {
                 schema.addColumn(column.name(), column.type(), column.maxLength());
             }
             Table table = new Table(schema, bufferPool, def.name(), fileManager);
-            tables.put(def.name(), table);
-
-            // TODO(human): slice 3, C9/C10/C11/C13. Rebuild every index in def.indexes() from the heap.
-            //   - Table.buildIndex(...) (Table.java:57) builds and populates without registering;
-            //     Table.addIndex(...) registers. Which IndexDef field replaces the hard-coded 100?
-            //   - D-010: a unique violation here must fail closed. Let the start-up fail with a
-            //     message naming the table, the index and (through the cause) the key, the same way
-            //     the missing-.tbl check above does. Opening must not write any file.
-            //   - A failed open must release what it opened (fileManager holds .tbl handles), or the
-            //     user cannot repair the file it just named. C13 deletes users.tbl to check this.
+            tables.put(def.name(), table); 
+            for (IndexDef idx : def.indexes()) {
+                try {
+                    TableIndex<?> built = table.buildIndex(idx.name(), idx.columnName(), idx.unique(), idx.maxDegree());
+                    table.addIndex(built);
+                } catch (IOException | RuntimeException e) {
+                    releaseHandlesAfterFailedOpen();
+                    throw new IllegalStateException("Cannot rebuild index '" + idx.name() + "' on table '"
+                            + def.name() + "': " + e.getMessage() + "; refusing to start", e);
+                }
+            }
         }
 
         warnAboutOrphans();
+    }
+
+    /** Close open .tbl handles without flushing: a failed open must not write any page. */
+    private void releaseHandlesAfterFailedOpen() {
+        try {
+            fileManager.close();
+        } catch (Exception closeFailure) {
+            System.err.println("WARNING: could not release table files after failed open: " + closeFailure.getMessage());
+        }
     }
 
     private void warnAboutOrphans() {
@@ -279,18 +289,13 @@ public class QueryEngineImpl implements QueryEngine {
         }
         
         try {
-            // TODO(human): slice 3 commit order (D-007 rule; C12, C14). The pieces, in no particular order:
-            //   publish: table.addIndex(newIndex)
-            //   build:   table.buildIndex(indexName, columnName, isUnique, DEFAULT_MAX_DEGREE)
-            //   commit:  catalogStore.save(catalogWithIndex(tableName, newIndex))
-            // Order them so that a throw at any step leaves memory and catalog.dat agreeing.
-            // Placeholder below = today's behaviour (no save), so C9-C14 stay red until you replace it.
+            // build, commit (save), then publish.
             TableIndex<?> newIndex = table.buildIndex(indexName, columnName, isUnique, DEFAULT_MAX_DEGREE);
+            catalogStore.save(catalogWithIndex(tableName, newIndex));
             table.addIndex(newIndex);
             return TableDto.forIndexResult(newIndex.getColumnName());
 
         } catch (Exception e) {
-            e.printStackTrace();
             return TableDto.forError("Error creating index: " + e.getMessage());
         }
     }

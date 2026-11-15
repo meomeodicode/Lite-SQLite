@@ -156,8 +156,9 @@ class IndexRestartE2ETest {
         assertEquals("idx_email", index.getIndexName());
 
         // An index that exists but was not populated returns nothing here (non-unique path).
-        assertEquals(List.of(List.of("2", "bob@x.com"), List.of("3", "bob@x.com")),
-                engine.doQuery("SELECT * FROM users WHERE email = 'bob@x.com'").getRows());
+        // No ORDER BY, so row order is not part of the contract: compare as a set.
+        assertEquals(java.util.Set.of(List.of("2", "bob@x.com"), List.of("3", "bob@x.com")),
+                new java.util.HashSet<>(engine.doQuery("SELECT * FROM users WHERE email = 'bob@x.com'").getRows()));
 
         insertUser(4, "bob@x.com");
         assertEquals(3, engine.doQuery("SELECT * FROM users WHERE email = 'bob@x.com'").getRows().size(),
