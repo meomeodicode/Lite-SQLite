@@ -13,7 +13,9 @@ public interface FileManager {
     File initializePhysicalTable(Table newTable) throws IOException;
     Block append(String fileName) throws IOException;
     int getBlockCount(String fileName) throws IOException;
-    void close() throws IOException; 
+    /** Makes every write so far durable on every open file (one fsync per file). */
+    void forceAll() throws IOException;
+    void close() throws IOException;
     int searchForEmptyBlock(String filename);
     Block searchForInsertableBlock(Table table, Object[] recordValues);
 }

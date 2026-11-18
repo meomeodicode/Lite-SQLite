@@ -94,7 +94,12 @@ public class BufferPool {
                         throw new RuntimeException("Failed to flush frame", e);
                     }
                 }
-            }); 
+            });
+            // Callers treat a returned flushAll as "this statement survives a power loss", but the
+            // files are "rw" (T0.2), so the writes above only reached the OS page cache. Force once,
+            // after every page is written (one fsync per file, not per page), and still under the
+            // lock so no page can be dirtied and evicted between the writes and the sync.
+            fManager.forceAll();
         }
         finally {
             lock.writeLock().unlock();

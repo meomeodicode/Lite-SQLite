@@ -43,6 +43,8 @@ import lite.sqlite.server.scan.RORecordScan;
 import lite.sqlite.server.scan.RORecordScanImpl;
 import lite.sqlite.server.storage.Block;
 import lite.sqlite.server.storage.BasicFileManager;
+import lite.sqlite.server.storage.io.FileIOProvider;
+import lite.sqlite.server.storage.io.RandomAccessFileIO;
 import lite.sqlite.server.storage.Page;
 import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.index.TableIndex;
@@ -97,10 +99,15 @@ public class QueryEngineImpl implements QueryEngine {
      * whose .tbl file is missing (D-007). Tests pass their own store to inject save failures.
      */
     QueryEngineImpl(File dbDirectory, EventEmitter eventEmitter, CatalogStore catalogStore) {
+        this(dbDirectory, eventEmitter, catalogStore, RandomAccessFileIO.PROVIDER);
+    }
+
+    /** Test seam: table files go through {@code io}, so crash tests can pass a {@code SimulatedDisk} (T0.2). */
+    QueryEngineImpl(File dbDirectory, EventEmitter eventEmitter, CatalogStore catalogStore, FileIOProvider io) {
         this.dbDirectory = dbDirectory;
         this.eventEmitter = Objects.requireNonNull(eventEmitter, "eventEmitter must not be null");
         this.catalogStore = Objects.requireNonNull(catalogStore, "catalogStore must not be null");
-        this.fileManager = new BasicFileManager(dbDirectory);
+        this.fileManager = new BasicFileManager(dbDirectory, null, Objects.requireNonNull(io, "io must not be null"));
         this.bufferPool = new BufferPool(50, fileManager);
         loadCatalog();
     }

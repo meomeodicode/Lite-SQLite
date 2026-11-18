@@ -2,29 +2,39 @@ package lite.sqlite.server.storage;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.concurrent.ConcurrentHashMap;
 
 import lite.sqlite.server.storage.buffer.BufferPool;
 import lite.sqlite.server.storage.filemanager.FileManager;
+import lite.sqlite.server.storage.io.FileIO;
+import lite.sqlite.server.storage.io.FileIOProvider;
+import lite.sqlite.server.storage.io.RandomAccessFileIO;
 import lite.sqlite.server.storage.record.SlottedRecordPage;
 import lite.sqlite.server.storage.table.Table;
 
 public class BasicFileManager implements FileManager {
 
     private final File dbDir;
-    private ConcurrentHashMap<String, RandomAccessFile> openFiles;
+    private final ConcurrentHashMap<String, FileIO> openFiles;
     private final BufferPool bufferPool;
+    private final FileIOProvider io;
 
     public BasicFileManager(File dbDirectory) {
         this(dbDirectory, null);
     }
 
     public BasicFileManager(File dbDirectory, BufferPool bufferPool) {
+        this(dbDirectory, bufferPool, RandomAccessFileIO.PROVIDER);
+    }
+
+    /** {@code io} is the only path to the disk; tests pass a {@code SimulatedDisk}. */
+    public BasicFileManager(File dbDirectory, BufferPool bufferPool, FileIOProvider io) {
         this.dbDir = dbDirectory;
         this.openFiles = new ConcurrentHashMap<>();
         this.bufferPool = bufferPool;
+        this.io = io;
 
         if (!dbDirectory.exists()) {
             dbDirectory.mkdirs();
@@ -44,12 +54,10 @@ public class BasicFileManager implements FileManager {
     @Override 
     public synchronized void read(Block blockId, Page page) throws IOException {
         try {
-            RandomAccessFile file = getFile(blockId.getFileName());
-            long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE; // Use Page.PAGE_SIZE!
-            file.seek(position);
-            
+            FileIO file = getFile(blockId.getFileName());
+            long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE;
             page.contents().clear(); // Reset buffer position
-            file.getChannel().read(page.contents());
+            file.read(position, page.contents());
             page.contents().rewind(); // Reset for reading
             
         } catch (IOException e) {
@@ -60,12 +68,10 @@ public class BasicFileManager implements FileManager {
     @Override
     public synchronized void write(Block blockId, Page page) throws IOException {
         try {
-            RandomAccessFile file = getFile(blockId.getFileName());
-            long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE; // Use Page.PAGE_SIZE!
-            file.seek(position);
-            
+            FileIO file = getFile(blockId.getFileName());
+            long position = (long) blockId.getBlockNum() * Page.PAGE_SIZE;
             page.contents().rewind(); // Reset buffer for writing
-            file.getChannel().write(page.contents());            
+            file.write(position, page.contents());
         } catch (IOException e) {
             throw new RuntimeException("Cannot write block " + blockId, e);
         }
@@ -77,13 +83,9 @@ public class BasicFileManager implements FileManager {
             int newBlockNum = getBlockCount(fileName); // Get current block count
             Block newBlock = new Block(fileName, newBlockNum);
             
-            RandomAccessFile file = getFile(fileName);
-            long position = (long) newBlockNum * Page.PAGE_SIZE; // Use PAGE_SIZE!
-            file.seek(position);
-            
-            // Write full page of zeros
-            byte[] emptyPage = new byte[Page.PAGE_SIZE]; // Fixed size!
-            file.write(emptyPage);
+            FileIO file = getFile(fileName);
+            long position = (long) newBlockNum * Page.PAGE_SIZE;
+            file.write(position, ByteBuffer.wrap(new byte[Page.PAGE_SIZE])); // full page of zeros
             
             return newBlock;
             
@@ -95,8 +97,8 @@ public class BasicFileManager implements FileManager {
     @Override
     public synchronized int getBlockCount(String fileName) throws IOException {
         try {
-            RandomAccessFile file = getFile(fileName);
-            long fileLength = file.length();
+            FileIO file = getFile(fileName);
+            long fileLength = file.size();
             return (int) Math.ceil((double) fileLength / Page.PAGE_SIZE);
             
         } catch (IOException e) {
@@ -113,11 +115,20 @@ public class BasicFileManager implements FileManager {
         }
 
         Block block0 = append(fileName);
+        // The caller saves the catalog (the commit point) next; the data must be durable first (D-007).
+        getFile(fileName).force();
         if (bufferPool != null) {
             bufferPool.pinBlock(block0);
             bufferPool.unpinBlock(block0);
         }
         return tableFile;
+    }
+
+    @Override
+    public synchronized void forceAll() throws IOException {
+        for (FileIO file : openFiles.values()) {
+            file.force();
+        }
     }
 
     @Override
@@ -131,8 +142,8 @@ public class BasicFileManager implements FileManager {
     }
 
     @Override
-    public void close() throws IOException {
-        for (RandomAccessFile file : openFiles.values()) {
+    public synchronized void close() throws IOException {
+        for (FileIO file : openFiles.values()) {
             file.close();
         }
         openFiles.clear();
@@ -173,11 +184,10 @@ public class BasicFileManager implements FileManager {
         return null;
     }
 
-    private RandomAccessFile getFile(String filename) throws IOException {
+    private FileIO getFile(String filename) throws IOException {
         return openFiles.computeIfAbsent(filename, fn -> {
             try {
-                File dbTable = new File(dbDir, fn);
-                return new RandomAccessFile(dbTable, "rws");
+                return io.open(new File(dbDir, fn).toPath());
             } catch (IOException e) {
                 throw new RuntimeException("Cannot open file: " + fn, e);
             }
